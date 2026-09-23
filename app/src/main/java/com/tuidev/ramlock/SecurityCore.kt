@@ -10,4 +10,4 @@ object SecurityCore {
     // La palabra clave 'external' le dice a Kotlin que esta función no tiene cuerpo,
     // sino que la JVM debe buscarla en la librería nativa cargada.
     external fun helloFromRust(): String
-}
+}

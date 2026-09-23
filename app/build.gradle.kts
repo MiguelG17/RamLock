@@ -52,3 +52,68 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }
+
+
+abstract class CargoNdkTask @javax.inject.Inject constructor(
+    private val execOperations: org.gradle.process.ExecOperations
+) : DefaultTask() {
+
+    @get:InputDirectory
+    abstract val rustSrcDir: DirectoryProperty
+
+    @get:InputFile
+    abstract val cargoToml: RegularFileProperty
+
+    @get:OutputDirectory
+    abstract val outputDirectory: DirectoryProperty
+
+    @get:Input
+    abstract val releaseMode: Property<Boolean>
+
+    @get:Input
+    abstract val targets: ListProperty<String>
+
+    @TaskAction
+    fun build() {
+        val isWindows = System.getProperty("os.name").lowercase().contains("windows")
+        val cargoCommand = if (isWindows) "cargo.exe" else "cargo"
+        val outDir = outputDirectory.get().asFile.absolutePath
+
+        val args = mutableListOf(cargoCommand, "ndk")
+        for (target in targets.get()) {
+            args.add("-t")
+            args.add(target)
+        }
+        args.add("-o")
+        args.add(outDir)
+        args.add("build")
+        if (releaseMode.get()) {
+            args.add("--release")
+        }
+
+        execOperations.exec {
+            workingDir = cargoToml.get().asFile.parentFile
+            commandLine(args)
+        }.assertNormalExitValue()
+    }
+}
+
+androidComponents {
+    onVariants { variant ->
+        val isRelease = variant.name.contains("release", ignoreCase = true)
+        val cargoTask = tasks.register<CargoNdkTask>("buildCargo${variant.name.replaceFirstChar { it.uppercase() }}") {
+            group = "rust"
+            description = "Compiles Rust code for variant ${variant.name} using cargo-ndk"
+            rustSrcDir.set(file("${project.rootDir}/rust_core/src"))
+            cargoToml.set(file("${project.rootDir}/rust_core/Cargo.toml"))
+            releaseMode.set(isRelease)
+            targets.set(listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64"))
+            outputDirectory.set(layout.buildDirectory.dir("intermediates/rustJniLibs/${variant.name}"))
+        }
+
+        variant.sources.jniLibs?.addGeneratedSourceDirectory(
+            cargoTask,
+            CargoNdkTask::outputDirectory
+        )
+    }
+}

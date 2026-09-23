@@ -1,0 +1,43 @@
+name: RamLock CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-and-test:
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      - name: Configurar Java (JDK 21)
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Configurar Rust y Targets para Android
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: aarch64-linux-android, armv7-linux-androideabi, i686-linux-android, x86_64-linux-android
+
+      - name: Instalar cargo-ndk
+        run: cargo install cargo-ndk
+
+      - name: Análisis Estático de Rust (Clippy)
+        run: cargo clippy --manifest-path rust_core/Cargo.toml -- -D warnings
+
+      - name: Ejecutar Tests Unitarios de Rust
+        run: cargo test --manifest-path rust_core/Cargo.toml
+
+      - name: Dar permisos de ejecución a gradlew
+        run: chmod +x gradlew
+
+      - name: Compilar Android y ejecutar Tests Unitarios de Kotlin
+        run: ./gradlew testDebugUnitTest
