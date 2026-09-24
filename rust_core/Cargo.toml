@@ -9,3 +9,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 jni = "0.21.1"
+aes-gcm = "0.10.3"
+argon2 = "0.5.3"
+zeroize = { version = "1.8.1", features = ["zeroize_derive"] }
+rand_core = { version = "0.6.4", features = ["std"] }
