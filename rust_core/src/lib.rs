@@ -101,6 +101,23 @@ pub extern "system" fn Java_com_tuidev_ramlock_SecurityCore_encryptData<'local>(
     let output = env.byte_array_from_slice(&ciphertext).unwrap();
     output.into_raw()
 }
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_tuidev_ramlock_SecurityCore_decryptData<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    password: JString<'local>,
+    data: JByteArray<'local>,
+) -> jbyteArray {
+    let mut password_rust: String = env.get_string(&password).unwrap().into();
+    let ciphertext_rust = env.convert_byte_array(&data).unwrap();
+
+    let key = SecureKey::derive_from_password(&mut password_rust, b"saltsalt");
+    let plaintext = key.decrypt_data(&ciphertext_rust).unwrap();
+    let output = env.byte_array_from_slice(&plaintext).unwrap();
+    output.into_raw()
+}
+
 // #[no_mangle] evita que el compilador de Rust cambie el nombre de la función,
 // permitiendo que la JVM de Android la encuentre exactamente como la definimos.
 #[unsafe(no_mangle)]
