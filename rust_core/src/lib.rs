@@ -87,7 +87,7 @@ impl SecureKey {
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_tuidev_ramlock_SecurityCore_encryptData<'local>(
+pub extern "system" fn Java_com_tuidev_ramlock_security_SecurityCore_encryptData<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     password: JString<'local>,
@@ -103,7 +103,7 @@ pub extern "system" fn Java_com_tuidev_ramlock_SecurityCore_encryptData<'local>(
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_tuidev_ramlock_SecurityCore_decryptData<'local>(
+pub extern "system" fn Java_com_tuidev_ramlock_security_SecurityCore_decryptData<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     password: JString<'local>,
@@ -121,7 +121,7 @@ pub extern "system" fn Java_com_tuidev_ramlock_SecurityCore_decryptData<'local>(
 // #[no_mangle] evita que el compilador de Rust cambie el nombre de la función,
 // permitiendo que la JVM de Android la encuentre exactamente como la definimos.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_tuidev_ramlock_SecurityCore_helloFromRust<'local>(
+pub extern "system" fn Java_com_tuidev_ramlock_security_SecurityCore_helloFromRust<'local>(
     env: JNIEnv<'local>,
     // JClass representa la clase de Kotlin que llama a esta función (SecurityCore)
     _class: JClass<'local>,

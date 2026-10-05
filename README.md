@@ -1,12 +1,12 @@
 # 🔒 RamLock
 
-!\[Android](https://img.shields.io/badge/Android-3DDC84?style=for-the-badge\&logo=android\&logoColor=white)
-!\[Rust](https://img.shields.io/badge/Rust-000000?style=for-the-badge\&logo=rust\&logoColor=white)
-!\[Kotlin](https://img.shields.io/badge/Kotlin-0095D5?style=for-the-badge\&logo=kotlin\&logoColor=white)
-!\[Jetpack Compose](https://img.shields.io/badge/Compose-4285F4?style=for-the-badge\&logo=jetpackcompose\&logoColor=white)
-!\[License](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)
+![Android](https://img.shields.io/badge/Android-3DDC84?style=for-the-badge&logo=android&logoColor=white)
+![Rust](https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white)
+![Kotlin](https://img.shields.io/badge/Kotlin-0095D5?style=for-the-badge&logo=kotlin&logoColor=white)
+![Jetpack Compose](https://img.shields.io/badge/Compose-4285F4?style=for-the-badge&logo=jetpackcompose&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)
 
-> \*\*Secure, local, and memory-safe file encryption vault for Android.\*\*
+> **Secure, local, and memory-safe file encryption vault for Android.**
 
 RamLock is a modern, production-ready Android application that provides true local file encryption. By combining a sleek Jetpack Compose interface with a low-level cryptographic engine written in Rust, RamLock guarantees that your data and passwords remain in RAM for the shortest possible time, mitigating memory scraping and unauthorized access.
 
@@ -36,7 +36,7 @@ RamLock follows Clean Architecture principles, ensuring a strict boundary betwee
 * Cross-compilation targets for Android:
 
 ```bash
-  rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86\_64-linux-android
+  rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
   ```
 
 ### Build Instructions
@@ -48,7 +48,7 @@ RamLock follows Clean Architecture principles, ensuring a strict boundary betwee
    ```
 
 2. Open the project in Android Studio.
-3. Gradle will automatically invoke Cargo to compile the `rust\_core` library during the build process.
+3. Gradle will automatically invoke Cargo to compile the `rust_core` library during the build process.
 4. Run the app on your emulator or physical device.
 
 ## 🧪 Testing
@@ -58,7 +58,7 @@ We enforce strict quality control:
 * **Rust Core:** Run unit tests and memory safety checks via `cargo test` and `cargo clippy`.
 * **Android:** Run UI and unit tests via `./gradlew test` and linting via `./gradlew detekt`.
 
-\---
+---
 
 *Crafted with precision for secure local storage.*
 
