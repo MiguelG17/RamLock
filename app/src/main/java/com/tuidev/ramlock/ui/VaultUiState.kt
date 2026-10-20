@@ -5,13 +5,22 @@ import com.tuidev.ramlock.data.FileMetadata
 
 data class VaultUiState(
     val isUnlocked: Boolean = false,
-
-    // List of encrypted files stored in Room
     val files: List<FileMetadata> = emptyList(),
-
-    // True while a heavy encryption or decryption process is underway
     val isLoading: Boolean = false,
+    val userMessage: String? = null,
 
-    // Temporary messages to display in a Snackbar (e.g., "File encrypted successfully")
-    val userMessage: String? = null
+    // File currently selected to open (drives the password dialog)
+    val fileToOpen: FileMetadata? = null,
+
+    // Decrypted result ready to display in the viewer
+    val openedFile: OpenedFile? = null,
+)
+
+/**
+ * Holds the decrypted bytes and the file type so the viewer knows how to render them.
+ */
+data class OpenedFile(
+    val name: String,
+    val category: FileCategory,
+    val bytes: ByteArray
 )

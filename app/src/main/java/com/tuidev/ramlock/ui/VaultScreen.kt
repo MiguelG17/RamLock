@@ -13,14 +13,18 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -35,6 +39,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -46,6 +51,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -169,6 +175,24 @@ fun VaultScreen(
                 CircularProgressIndicator()
             }
         }
+
+        // Show password dialog when a file is tapped
+        uiState.fileToOpen?.let { file ->
+            DecryptPasswordDialog(
+                fileName = file.originalName,
+                onConfirm = { password -> viewModel.openFile(file, password) },
+                onDismiss = { viewModel.dismissOpenDialog() }
+            )
+        }
+
+// Show the file viewer when bytes are ready
+        uiState.openedFile?.let { openedFile ->
+            FileViewerDialog(
+                openedFile = openedFile,
+                context = context,
+                onDismiss = { viewModel.closeViewer() }
+            )
+        }
     }
 }
 
@@ -193,13 +217,13 @@ private fun LockView(
         )
 
         Text(
-            text = "Bóveda Bloqueada",
+            text = "Locked Vault",
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold
         )
 
         Text(
-            text = "Introduce tu contraseña maestra para descifrar la sesión en memoria RAM.",
+            text = "Enter your master password to decrypt the session in RAM.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 8.dp, bottom = 24.dp)
@@ -208,7 +232,7 @@ private fun LockView(
         OutlinedTextField(
             value = passwordInput,
             onValueChange = { passwordInput = it },
-            label = { Text("Contraseña Maestra") },
+            label = { Text("Master Password") },
             visualTransformation = PasswordVisualTransformation(),
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
@@ -221,7 +245,7 @@ private fun LockView(
             modifier = Modifier.fillMaxWidth(),
             enabled = passwordInput.isNotBlank()
         ) {
-            Text("Desbloquear")
+            Text("Unlock")
         }
     }
 }
@@ -344,4 +368,165 @@ private fun formatFileSize(bytes: Long): String {
 private fun formatDate(timestamp: Long): String {
     val formatter = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
     return formatter.format(Date(timestamp))
+}
+
+@Composable
+fun DecryptPasswordDialog(
+    fileName: String,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var passwordInput by remember { mutableStateOf("") }
+    var hasError by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Text("🔑", style = MaterialTheme.typography.headlineMedium) },
+        title = { Text("Open file") },
+        text = {
+            Column {
+                Text(
+                    text = "Enter the password to decrypt:",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Text(
+                    text = fileName,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                OutlinedTextField(
+                    value = passwordInput,
+                    onValueChange = {
+                        passwordInput = it
+                        hasError = false
+                    },
+                    label = { Text("Password") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    isError = hasError,
+                    supportingText = if (hasError) {
+                        { Text("The password cannot be left blank") }
+                    } else null,
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (passwordInput.isBlank()) {
+                        hasError = true
+                    } else {
+                        onConfirm(passwordInput)
+                    }
+                }
+            ) { Text("Decipher") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@Composable
+fun FileViewerDialog(
+    openedFile: OpenedFile,
+    context: android.content.Context,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.fillMaxWidth(),
+        title = {
+            Text(
+                text = openedFile.name,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        },
+        text = {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 100.dp, max = 400.dp)
+            ) {
+                when (openedFile.category) {
+                    FileCategory.IMAGE -> {
+                        // Decode image bytes in RAM and render without saving to disk
+                        val bitmap = remember(openedFile.bytes) {
+                            android.graphics.BitmapFactory.decodeByteArray(
+                                openedFile.bytes, 0, openedFile.bytes.size
+                            )
+                        }
+                        if (bitmap != null) {
+                            androidx.compose.foundation.Image(
+                                bitmap = bitmap.asImageBitmap(),
+                                contentDescription = openedFile.name,
+                                contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        } else {
+                            Text("The image could not be decoded")
+                        }
+                    }
+
+                    FileCategory.TEXT -> {
+                        // Show text content with scroll
+                        val text = remember(openedFile.bytes) {
+                            openedFile.bytes.toString(Charsets.UTF_8)
+                        }
+                        Text(
+                            text = text,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            modifier = Modifier.verticalScroll(rememberScrollState())
+                        )
+                    }
+
+                    else -> {
+                        // For PDF, video, audio: write to cache and open with system app
+                        LaunchedEffect(openedFile) {
+                            openWithSystemApp(context, openedFile)
+                            onDismiss()
+                        }
+                        Box(
+                            modifier = Modifier.fillMaxWidth(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator()
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Close") }
+        }
+    )
+}
+
+/**
+ * Writes decrypted bytes to a temporary cache file and opens it with the appropriate system app.
+ * The cache file is auto-cleaned by Android when storage pressure increases.
+ */
+private fun openWithSystemApp(context: android.content.Context, openedFile: OpenedFile) {
+    val cacheFile = java.io.File(context.cacheDir, openedFile.name)
+    cacheFile.writeBytes(openedFile.bytes)
+
+    val uri = androidx.core.content.FileProvider.getUriForFile(
+        context,
+        "${context.packageName}.fileprovider",
+        cacheFile
+    )
+
+    val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+        setDataAndType(uri, getMimeType(openedFile.name))
+        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+
+    context.startActivity(android.content.Intent.createChooser(intent, "Open with..."))
 }

@@ -165,4 +165,46 @@ class VaultViewModel(
             throw IllegalArgumentException("Unknown ViewModel class")
         }
     }
+
+    /** Called when the user taps a file card: shows the password dialog. */
+    fun onFileClick(metadata: FileMetadata) {
+        _uiState.update { it.copy(fileToOpen = metadata) }
+    }
+
+    /** Called when the user dismisses the password dialog. */
+    fun dismissOpenDialog() {
+        _uiState.update { it.copy(fileToOpen = null) }
+    }
+
+    /** Called when the user dismisses the file viewer. */
+    fun closeViewer() {
+        _uiState.update { it.copy(openedFile = null) }
+    }
+
+    /** Decrypts and opens a file using the provided password. */
+    fun openFile(metadata: FileMetadata, password: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true, fileToOpen = null) }
+
+            val result = repository.decryptFile(metadata, password)
+
+            if (result.isSuccess) {
+                val category = getFileCategory(metadata.originalName)
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        openedFile = OpenedFile(
+                            name = metadata.originalName,
+                            category = category,
+                            bytes = result.getOrThrow()
+                        )
+                    )
+                }
+            } else {
+                _uiState.update {
+                    it.copy(isLoading = false, userMessage = "Incorrect password or corrupted file")
+                }
+            }
+        }
+    }
 }
