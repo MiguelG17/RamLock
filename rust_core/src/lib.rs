@@ -109,13 +109,30 @@ pub extern "system" fn Java_com_tuidev_ramlock_security_SecurityCore_decryptData
     password: JString<'local>,
     data: JByteArray<'local>,
 ) -> jbyteArray {
-    let mut password_rust: String = env.get_string(&password).unwrap().into();
-    let ciphertext_rust = env.convert_byte_array(&data).unwrap();
+    // 1. Safely extract password and ciphertext without panicking
+    let Ok(password_str) = env.get_string(&password) else {
+        return std::ptr::null_mut();
+    };
+    let mut password_rust: String = password_str.into();
 
+    let Ok(ciphertext_rust) = env.convert_byte_array(&data) else {
+        return std::ptr::null_mut();
+    };
+
+    // 2. Derive key from password
     let key = SecureKey::derive_from_password(&mut password_rust, b"saltsalt");
-    let plaintext = key.decrypt_data(&ciphertext_rust).unwrap();
-    let output = env.byte_array_from_slice(&plaintext).unwrap();
-    output.into_raw()
+
+    // 3. Attempt decryption: if password or data is wrong, return null safely
+    match key.decrypt_data(&ciphertext_rust) {
+        Ok(plaintext) => match env.byte_array_from_slice(&plaintext) {
+            Ok(output) => output.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        },
+        Err(_) => {
+            // Authentication tag mismatch (wrong password or corrupted payload)
+            std::ptr::null_mut()
+        }
+    }
 }
 
 // #[no_mangle] evita que el compilador de Rust cambie el nombre de la función,

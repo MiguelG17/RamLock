@@ -50,11 +50,12 @@ class VaultRepository(
         password: String
     ): Result<ByteArray> = withContext(Dispatchers.IO) {
         try {
-            // A. Read the encrypted bytes from the sandbox
+            // A. Read encrypted bytes from sandbox
             val encryptedBytes = storage.readEncryptedFile(metadata.encryptedFileName)
 
-            // B. Native decryption using Rust
+            // B. Decrypt with Rust (returns null if password is invalid)
             val decryptedBytes = SecurityCore.decryptData(password, encryptedBytes)
+                ?: return@withContext Result.failure(IllegalArgumentException("Incorrect password or corrupted file"))
 
             Result.success(decryptedBytes)
         } catch (e: Exception) {

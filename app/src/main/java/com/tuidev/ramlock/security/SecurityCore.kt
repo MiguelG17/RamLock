@@ -11,6 +11,7 @@ object SecurityCore {
     // sino que la JVM debe buscarla en la librería nativa cargada.
     external fun helloFromRust(): String
 
-    external fun decryptData(password: String, data: ByteArray): ByteArray
+    // Returns null if the password is incorrect or data is corrupted
+    external fun decryptData(password: String, data: ByteArray): ByteArray?
     external fun encryptData(password: String, data: ByteArray): ByteArray
 }
