@@ -107,6 +107,15 @@ fun VaultScreen(
         }
     }
 
+    // Show password dialog when a file card is tapped
+    uiState.fileToOpen?.let { file ->
+        DecryptPasswordDialog(
+            fileName = file.originalName,
+            onConfirm = { password -> viewModel.openFile(file, password) },
+            onDismiss = { viewModel.dismissOpenDialog() }
+        )
+    }
+
     Scaffold(
         modifier = modifier.fillMaxSize(),
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -155,13 +164,7 @@ fun VaultScreen(
                 } else {
                     FileList(
                         files = uiState.files,
-                        onFileClick = { metadata ->
-                            viewModel.decryptFile(metadata) { decryptedBytes ->
-                                decryptedBytesCache = decryptedBytes
-                                fileToExport = metadata
-                                exportLauncher.launch(metadata.originalName)
-                            }
-                        },
+                        onFileClick = { metadata -> viewModel.onFileClick(metadata) },
                         onDeleteFile = { metadata -> viewModel.deleteFile(metadata) }
                     )
                 }
@@ -302,7 +305,7 @@ private fun FileItemCard(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        onClick = onClick,  // 👈 La tarjeta entera ahora es clickeable
+        onClick = onClick,
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant
         )
