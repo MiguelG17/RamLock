@@ -277,9 +277,8 @@ private fun FileItemCard(
     onDelete: () -> Unit
 ) {
     Card(
-        modifier = Modifier
-            .fillMaxWidth(),
-        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        onClick = onClick,  // 👈 La tarjeta entera ahora es clickeable
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant
         )
@@ -290,6 +289,13 @@ private fun FileItemCard(
                 .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // File type icon based on extension
+            Text(
+                text = getFileIcon(metadata.originalName),
+                style = MaterialTheme.typography.headlineMedium,
+                modifier = Modifier.padding(end = 12.dp)
+            )
+
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = metadata.originalName,
