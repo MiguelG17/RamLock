@@ -2,11 +2,11 @@ package com.tuidev.ramlock.data
 
 import android.content.Context
 import java.io.File
+import java.io.FileNotFoundException
 import java.util.UUID
 
 class VaultFileStorage(private val context: Context) {
 
-    // Path to the private folder: /data/user/0/com.tuidev.ramlock/files/vault
     private val vaultDirectory: File
         get() = File(context.filesDir, "vault").apply {
             if (!exists()) {
@@ -33,17 +33,27 @@ class VaultFileStorage(private val context: Context) {
     fun readEncryptedFile(encryptedFileName: String): ByteArray {
         val targetFile = File(vaultDirectory, encryptedFileName)
         if (!targetFile.exists()) {
-            throw IllegalArgumentException("The file $encryptedFileName does not exist in the repository")
+            throw FileNotFoundException("El archivo cifrado no existe en el almacenamiento privado.")
         }
         return targetFile.readBytes()
     }
 
     /**
      * Deletes the physical file from the internal memory.
-     * @return true if it was successfully deleted, false otherwise
+     * @return true if it was successfully deleted or was already missing
      */
     fun deleteEncryptedFile(encryptedFileName: String): Boolean {
         val targetFile = File(vaultDirectory, encryptedFileName)
-        return targetFile.exists() && targetFile.delete()
+        if (!targetFile.exists()) {
+            return true
+        }
+        return targetFile.delete()
+    }
+
+    /**
+     * Checks if the physical encrypted file exists on disk.
+     */
+    fun fileExists(encryptedFileName: String): Boolean {
+        return File(vaultDirectory, encryptedFileName).exists()
     }
 }

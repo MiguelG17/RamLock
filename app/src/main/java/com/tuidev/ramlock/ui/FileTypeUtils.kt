@@ -1,5 +1,14 @@
 package com.tuidev.ramlock.ui
 
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.Movie
+import androidx.compose.material.icons.outlined.MusicNote
+import androidx.compose.material.icons.outlined.PictureAsPdf
+import androidx.compose.ui.graphics.vector.ImageVector
+
 enum class FileCategory {
     IMAGE, TEXT, VIDEO, AUDIO, PDF, OTHER
 }
@@ -19,16 +28,16 @@ fun getFileCategory(originalName: String): FileCategory {
 }
 
 /**
- * Returns a descriptive emoji icon for the file type card.
+ * Returns a high-quality vector icon for the file type card.
  */
-fun getFileIcon(originalName: String): String {
+fun getFileIconVector(originalName: String): ImageVector {
     return when (getFileCategory(originalName)) {
-        FileCategory.IMAGE -> "🖼️"
-        FileCategory.TEXT -> "📝"
-        FileCategory.VIDEO -> "🎬"
-        FileCategory.AUDIO -> "🎵"
-        FileCategory.PDF -> "📄"
-        FileCategory.OTHER -> "📦"
+        FileCategory.IMAGE -> Icons.Outlined.Image
+        FileCategory.TEXT -> Icons.Outlined.Description
+        FileCategory.VIDEO -> Icons.Outlined.Movie
+        FileCategory.AUDIO -> Icons.Outlined.MusicNote
+        FileCategory.PDF -> Icons.Outlined.PictureAsPdf
+        FileCategory.OTHER -> Icons.AutoMirrored.Outlined.InsertDriveFile
     }
 }
 

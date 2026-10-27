@@ -4,7 +4,6 @@ import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
-
 @Entity(tableName = "files_metadata")
 data class FileMetadata(
     @PrimaryKey(autoGenerate = true)
@@ -16,5 +15,7 @@ data class FileMetadata(
     @ColumnInfo(name = "file_size")
     val fileSize: Long,
     @ColumnInfo(name = "created_at")
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    @ColumnInfo(name = "original_path", defaultValue = "NULL")
+    val originalPath: String? = null
 )

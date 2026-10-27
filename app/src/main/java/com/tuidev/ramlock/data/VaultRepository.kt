@@ -10,16 +10,24 @@ class VaultRepository(
     private val storage: VaultFileStorage
 ) {
 
-    // 1. Reactive file flow for the UI
+    // Reactive file flow for the UI
     val allFiles: Flow<List<FileMetadata>> = dao.getAllFiles()
 
     /**
-     * Encrypt the bytes using Rust, save them to the private storage and record the metadata in Room.
+     * Checks if the physical encrypted file is missing from disk.
+     */
+    fun isFileOrphaned(encryptedFileName: String): Boolean {
+        return !storage.fileExists(encryptedFileName)
+    }
+
+    /**
+     * Encrypt the bytes using Rust, save them to private storage and record metadata in Room.
      */
     suspend fun encryptAndSaveFile(
         originalName: String,
         fileBytes: ByteArray,
-        password: String
+        password: String,
+        originalPath: String? = null
     ): Result<FileMetadata> = withContext(Dispatchers.IO) {
         try {
             // A. Native in-memory encryption with Rust
@@ -32,7 +40,8 @@ class VaultRepository(
             val metadata = FileMetadata(
                 originalName = originalName,
                 encryptedFileName = encryptedFileName,
-                fileSize = fileBytes.size.toLong()
+                fileSize = fileBytes.size.toLong(),
+                originalPath = originalPath
             )
             val generatedId = dao.insertFile(metadata)
 
@@ -43,7 +52,7 @@ class VaultRepository(
     }
 
     /**
-     * Read the bytes from the private disk and decrypt them using Rust with the given password.
+     * Read bytes from private disk and decrypt them using Rust with the given password.
      */
     suspend fun decryptFile(
         metadata: FileMetadata,
@@ -64,7 +73,7 @@ class VaultRepository(
     }
 
     /**
-     * Deletes the physical file from the disk and its entry in the database.
+     * Deletes the physical file from disk and its entry in database.
      */
     suspend fun deleteFile(metadata: FileMetadata): Result<Unit> = withContext(Dispatchers.IO) {
         try {

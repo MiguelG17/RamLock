@@ -2,12 +2,11 @@ package com.tuidev.ramlock.ui
 
 import com.tuidev.ramlock.data.FileMetadata
 
-
 data class VaultUiState(
     val isUnlocked: Boolean = false,
     val files: List<FileMetadata> = emptyList(),
     val isLoading: Boolean = false,
-    val userMessage: String? = null,
+    val userMessage: UiText? = null,
 
     // File currently selected to open (drives the password dialog)
     val fileToOpen: FileMetadata? = null,

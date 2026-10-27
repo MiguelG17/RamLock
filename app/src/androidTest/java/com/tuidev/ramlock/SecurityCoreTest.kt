@@ -32,12 +32,13 @@ class SecurityCoreTest {
         assertNotNull(encryptedBytes)
         // The encrypted content must be different from the original
         assertFalse(originalBytes.contentEquals(encryptedBytes))
-        // AES-GCM adds 12 bytes of nonce at the start + 16 bytes of authentication tag (Tag)
-        assertEquals(originalBytes.size + 12 + 16, encryptedBytes.size)
+        // Argon2 salt (16 bytes) + AES-GCM nonce (12 bytes) + authentication tag (16 bytes) = 44 bytes total overhead
+        assertEquals(originalBytes.size + 16 + 12 + 16, encryptedBytes.size)
 
         // 2. Decoded using Rust
         val decryptedBytes = SecurityCore.decryptData(password, encryptedBytes)
-        val decryptedText = String(decryptedBytes, Charsets.UTF_8)
+        assertNotNull(decryptedBytes)
+        val decryptedText = String(decryptedBytes!!, Charsets.UTF_8)
 
         // We check that we have retrieved the exact original message
         assertEquals(originalText, decryptedText)

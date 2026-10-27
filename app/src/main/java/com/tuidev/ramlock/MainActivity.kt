@@ -1,9 +1,12 @@
 package com.tuidev.ramlock
 
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.tuidev.ramlock.data.AppDatabase
 import com.tuidev.ramlock.data.VaultFileStorage
 import com.tuidev.ramlock.data.VaultRepository
@@ -22,7 +25,16 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
         super.onCreate(savedInstanceState)
+
+        // Block screenshots, screen recording, and recent apps preview thumbnails
+        window.setFlags(
+            WindowManager.LayoutParams.FLAG_SECURE,
+            WindowManager.LayoutParams.FLAG_SECURE
+        )
+
+        enableEdgeToEdge()
 
         setContent {
             RamLockTheme {
