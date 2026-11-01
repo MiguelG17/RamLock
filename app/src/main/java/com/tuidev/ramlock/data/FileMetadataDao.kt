@@ -20,4 +20,7 @@ interface FileMetadataDao {
 
     @Query("SELECT * FROM files_metadata WHERE id = :id LIMIT 1")
     suspend fun getFileById(id: Long): FileMetadata?
+
+    @Query("DELETE FROM files_metadata")
+    suspend fun deleteAllFiles(): Int
 }

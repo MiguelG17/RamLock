@@ -18,17 +18,18 @@ pub struct SecureKey {
 }
 
 impl SecureKey {
-    pub fn derive_from_password(password: &mut String, salt: &[u8]) -> Self {
+    pub fn derive_from_password(password: &mut String, salt: &[u8]) -> Result<Self, String> {
         let mut key = SecureKey { bytes: [0; 32] };
         let argon2 = Argon2::default();
-        argon2
-            .hash_password_into(password.as_bytes(), salt, &mut key.bytes)
-            .expect("Fatal error in the Argon2 derivation");
+        if let Err(e) = argon2.hash_password_into(password.as_bytes(), salt, &mut key.bytes) {
+            password.zeroize();
+            return Err(format!("Argon2 error: {}", e));
+        }
 
         // We overwrite the password string with zeros in RAM.
         password.zeroize();
 
-        key
+        Ok(key)
     }
 
     pub fn encrypt_data(&self, plaintext: &[u8]) -> Result<Vec<u8>, String> {
@@ -86,26 +87,38 @@ pub extern "system" fn Java_com_tuidev_ramlock_security_SecurityCore_encryptData
     password: JString<'local>,
     data: JByteArray<'local>,
 ) -> jbyteArray {
-    let mut password_rust: String = env.get_string(&password).unwrap().into();
-    let plaintext_rust = env.convert_byte_array(&data).unwrap();
+    let Ok(password_str) = env.get_string(&password) else {
+        return std::ptr::null_mut();
+    };
+    let mut password_rust: String = password_str.into();
+
+    let Ok(plaintext_rust) = env.convert_byte_array(&data) else {
+        return std::ptr::null_mut();
+    };
 
     // 1. Generate a random 16-byte salt for Argon2
     let mut salt = [0u8; 16];
     OsRng.fill_bytes(&mut salt);
 
     // 2. Derive key using the unique salt
-    let key = SecureKey::derive_from_password(&mut password_rust, &salt);
+    let Ok(key) = SecureKey::derive_from_password(&mut password_rust, &salt) else {
+        return std::ptr::null_mut();
+    };
 
     // 3. Encrypt data (returns [12 bytes Nonce] + [Ciphertext])
-    let encrypted_payload = key.encrypt_data(&plaintext_rust).unwrap();
+    let Ok(encrypted_payload) = key.encrypt_data(&plaintext_rust) else {
+        return std::ptr::null_mut();
+    };
 
     // 4. Prepend the 16-byte salt to the output payload:
     // Final layout: [16 bytes Salt] + [12 bytes Nonce] + [Ciphertext]
     let mut final_payload = salt.to_vec();
     final_payload.extend_from_slice(&encrypted_payload);
 
-    let output = env.byte_array_from_slice(&final_payload).unwrap();
-    output.into_raw()
+    match env.byte_array_from_slice(&final_payload) {
+        Ok(output) => output.into_raw(),
+        Err(_) => std::ptr::null_mut(),
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -135,7 +148,9 @@ pub extern "system" fn Java_com_tuidev_ramlock_security_SecurityCore_decryptData
     let encrypted_payload = &payload_rust[16..];
 
     // 3. Derive key using the extracted salt
-    let key = SecureKey::derive_from_password(&mut password_rust, salt);
+    let Ok(key) = SecureKey::derive_from_password(&mut password_rust, salt) else {
+        return std::ptr::null_mut();
+    };
 
     // 4. Decrypt payload ([12 bytes Nonce] + [Ciphertext])
     match key.decrypt_data(encrypted_payload) {
@@ -153,8 +168,8 @@ pub extern "system" fn Java_com_tuidev_ramlock_security_SecurityCore_helloFromRu
     _class: JClass<'local>,
 ) -> jstring {
     let rust_string = "¡Hola desde el núcleo criptográfico en Rust!";
-    let output: JString = env
-        .new_string(rust_string)
-        .expect("Fallo al crear el string de Java");
-    output.into_raw()
+    match env.new_string(rust_string) {
+        Ok(output) => output.into_raw(),
+        Err(_) => std::ptr::null_mut(),
+    }
 }

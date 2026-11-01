@@ -31,7 +31,7 @@ class SecurityCoreTest {
 
         assertNotNull(encryptedBytes)
         // The encrypted content must be different from the original
-        assertFalse(originalBytes.contentEquals(encryptedBytes))
+        assertFalse(originalBytes.contentEquals(encryptedBytes!!))
         // Argon2 salt (16 bytes) + AES-GCM nonce (12 bytes) + authentication tag (16 bytes) = 44 bytes total overhead
         assertEquals(originalBytes.size + 16 + 12 + 16, encryptedBytes.size)
 
@@ -52,7 +52,8 @@ class SecurityCoreTest {
         val originalBytes = ByteArray(64 * 1024) { (it % 256).toByte() }
 
         val encryptedBytes = SecurityCore.encryptData(password, originalBytes)
-        val decryptedBytes = SecurityCore.decryptData(password, encryptedBytes)
+        assertNotNull(encryptedBytes)
+        val decryptedBytes = SecurityCore.decryptData(password, encryptedBytes!!)
 
         assertArrayEquals(originalBytes, decryptedBytes)
     }

@@ -56,4 +56,15 @@ class VaultFileStorage(private val context: Context) {
     fun fileExists(encryptedFileName: String): Boolean {
         return File(vaultDirectory, encryptedFileName).exists()
     }
+
+    /**
+     * Physical panic wipe: Deletes all encrypted files in the vault folder.
+     */
+    fun clearAllFiles() {
+        if (vaultDirectory.exists()) {
+            vaultDirectory.listFiles()?.forEach { file ->
+                try { file.delete() } catch (_: Exception) {}
+            }
+        }
+    }
 }

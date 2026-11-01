@@ -32,6 +32,7 @@ class VaultRepository(
         try {
             // A. Native in-memory encryption with Rust
             val encryptedBytes = SecurityCore.encryptData(password, fileBytes)
+                ?: return@withContext Result.failure(IllegalStateException("Failed to encrypt file data"))
 
             // B. Physical storage in the internal sandbox
             val encryptedFileName = storage.saveEncryptedFile(encryptedBytes)
@@ -83,6 +84,19 @@ class VaultRepository(
             // B. Delete from Room
             dao.deleteFile(metadata)
 
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Complete panic wipe: Purges all files from private storage and wipes Room DB records.
+     */
+    suspend fun wipeAllVaultFiles(): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            storage.clearAllFiles()
+            dao.deleteAllFiles()
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
