@@ -4,33 +4,71 @@ import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.tuidev.ramlock.R
 import com.tuidev.ramlock.data.FileMetadata
+import com.tuidev.ramlock.data.SecurityPreferencesRepository
 import com.tuidev.ramlock.data.VaultRepository
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileNotFoundException
 import java.util.Locale
 
 class VaultViewModel(
-    private val repository: VaultRepository
+    private val repository: VaultRepository,
+    private val securityPreferences: SecurityPreferencesRepository
 ) : ViewModel() {
+
+    private val exceptionHandler = CoroutineExceptionHandler { _, throwable ->
+        Log.e("RamLock", "Unhandled exception in VaultViewModel coroutine", throwable)
+        _uiState.update {
+            it.copy(
+                isLoading = false,
+                userMessage = UiText.StringResource(
+                    R.string.error_generic,
+                    throwable.message ?: ""
+                )
+            )
+        }
+    }
 
     private val _uiState = MutableStateFlow(VaultUiState())
     val uiState: StateFlow<VaultUiState> = _uiState.asStateFlow()
 
-    // The master password exists solely in RAM during the session
+    // Security preferences reactive state flows
+    val isOnboardingCompleted: StateFlow<Boolean> = securityPreferences.isOnboardingCompleted
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    val isBiometricsEnabled: StateFlow<Boolean> = securityPreferences.isBiometricsEnabled
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    val masterPin: StateFlow<String?> = securityPreferences.masterPin
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    val isPanicEnabled: StateFlow<Boolean> = securityPreferences.isPanicEnabled
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    val panicPin: StateFlow<String?> = securityPreferences.panicPin
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    // Master session password stored exclusively in RAM
     private var currentPassword: String? = null
 
     init {
-        viewModelScope.launch {
+        viewModelScope.launch(exceptionHandler) {
             repository.allFiles.collect { fileList ->
                 _uiState.update { it.copy(files = fileList) }
             }
@@ -38,26 +76,114 @@ class VaultViewModel(
     }
 
     /**
-     * Checks if the physical encrypted file is missing from disk storage.
+     * Completes initial onboarding and saves security settings.
      */
-    fun isFileOrphaned(encryptedFileName: String): Boolean {
-        return repository.isFileOrphaned(encryptedFileName)
-    }
-
-    /**
-     * Unlock the vault by temporarily storing the password in RAM.
-     */
-    fun unlockVault(password: String) {
-        if (password.isNotBlank()) {
-            currentPassword = password
-            _uiState.update { it.copy(isUnlocked = true, userMessage = null) }
-        } else {
-            _uiState.update { it.copy(userMessage = UiText.StringResource(R.string.error_empty_password)) }
+    fun completeOnboarding(pin: String?, enableBiometrics: Boolean, panicPin: String?) {
+        viewModelScope.launch(exceptionHandler) {
+            securityPreferences.saveSecuritySettings(
+                onboardingCompleted = true,
+                masterPin = pin,
+                enableBiometrics = enableBiometrics,
+                panicPin = panicPin
+            )
+            if (!pin.isNullOrBlank()) {
+                currentPassword = pin
+                _uiState.update { it.copy(isUnlocked = true) }
+            }
         }
     }
 
     /**
-     * Lock the vault and wipe the session password from RAM memory.
+     * Saves updated security settings from Settings Dialog.
+     */
+    fun saveSecuritySettings(pin: String?, enableBiometrics: Boolean, panicPin: String?) {
+        viewModelScope.launch(exceptionHandler) {
+            securityPreferences.saveSecuritySettings(
+                onboardingCompleted = true,
+                masterPin = pin,
+                enableBiometrics = enableBiometrics,
+                panicPin = panicPin
+            )
+            _uiState.update {
+                it.copy(userMessage = UiText.StringResource(R.string.settings_save_success))
+            }
+        }
+    }
+
+    /**
+     * Unlock vault with password or biometric success. Checks for Panic Key.
+     */
+    fun unlockVault(password: String) {
+        viewModelScope.launch(exceptionHandler) {
+            val configuredPanic = securityPreferences.panicPin.first()
+            val panicActive = securityPreferences.isPanicEnabled.first()
+
+            // Panic Key check: If entered key matches configured Panic Key, wipe everything instantly and enter empty vault
+            if (panicActive && !configuredPanic.isNullOrBlank() && password == configuredPanic) {
+                triggerPanicWipe(password)
+                return@launch
+            }
+
+            val configuredMaster = securityPreferences.masterPin.first()
+            if (configuredMaster.isNullOrBlank() || password == configuredMaster) {
+                currentPassword = password
+                _uiState.update { it.copy(isUnlocked = true, userMessage = null) }
+            } else {
+                _uiState.update {
+                    it.copy(
+                        isUnlocked = false,
+                        userMessage = UiText.StringResource(R.string.error_incorrect_password)
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Unlock vault session via Biometric authentication success.
+     */
+    fun unlockVaultWithBiometrics() {
+        viewModelScope.launch(exceptionHandler) {
+            val pin = securityPreferences.masterPin.first()
+            if (!pin.isNullOrBlank()) {
+                currentPassword = pin
+            } else {
+                currentPassword = "biometric_session_key"
+            }
+            _uiState.update { it.copy(isUnlocked = true, userMessage = null) }
+        }
+    }
+
+    /**
+     * Emergency Panic Wipe: Deletes all files physically and in Room DB, then unlocks into an empty vault.
+     */
+    private suspend fun triggerPanicWipe(password: String) {
+        _uiState.update { it.copy(isLoading = true) }
+        repository.wipeAllVaultFiles()
+        currentPassword = password
+        _uiState.update {
+            it.copy(
+                isUnlocked = true,
+                isLoading = false,
+                files = emptyList(),
+                userMessage = null
+            )
+        }
+    }
+
+    /**
+     * Checks if the physical encrypted file is missing from disk storage.
+     */
+    fun isFileOrphaned(encryptedFileName: String): Boolean {
+        return try {
+            repository.isFileOrphaned(encryptedFileName)
+        } catch (_: Exception) {
+            true
+        }
+    }
+
+    /**
+     * Lock the vault and wipe session password from RAM memory.
      */
     fun lockVault() {
         currentPassword = null
@@ -65,64 +191,79 @@ class VaultViewModel(
     }
 
     /**
-     * Reads the file selected by the user using SAF, encrypts it with Rust using the specified file password,
-     * saves it into the private vault, and attempts to delete the original source file.
+     * Reads the file selected by user using SAF, encrypts it with Rust using specified file password,
+     * saves it into private vault, and attempts to delete original source file.
      */
     fun importAndEncryptFile(context: Context, uri: Uri, filePassword: String) {
-        viewModelScope.launch {
+        viewModelScope.launch(exceptionHandler) {
             _uiState.update { it.copy(isLoading = true) }
 
             try {
-                // Pre-check file size to prevent OutOfMemoryError
-                val maxSizeBytes = 150L * 1024 * 1024 // 150 MB limit
-                val fileSize = getFileSize(context, uri)
-                if (fileSize > maxSizeBytes) {
-                    val sizeMb = String.format(Locale.US, "%.1f", fileSize / (1024f * 1024f))
-                    _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            userMessage = UiText.StringResource(R.string.error_file_too_large, sizeMb)
-                        )
+                // Move all heavy I/O off the main thread to prevent ANR
+                val importResult = withContext(Dispatchers.IO) {
+                    // Pre-check file size to prevent OutOfMemoryError
+                    val maxSizeBytes = 150L * 1024 * 1024 // 150 MB limit
+                    val fileSize = getFileSize(context, uri)
+                    if (fileSize > maxSizeBytes) {
+                        val sizeMb = String.format(Locale.US, "%.1f", fileSize / (1024f * 1024f))
+                        return@withContext ImportResult.TooLarge(sizeMb)
                     }
-                    return@launch
+
+                    // 1. Retrieve original name
+                    val fileName = getFileName(context, uri) ?: "unnamed_file"
+
+                    // 2. Read bytes using ContentResolver
+                    val fileBytes = context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                        inputStream.readBytes()
+                    } ?: throw IllegalArgumentException(context.getString(R.string.error_could_not_read_file))
+
+                    // 3. Encrypt and save using Repository (storing original uri string)
+                    val result = repository.encryptAndSaveFile(
+                        originalName = fileName,
+                        fileBytes = fileBytes,
+                        password = filePassword,
+                        originalPath = uri.toString()
+                    )
+
+                    if (result.isSuccess) {
+                        // 4. Move file: attempt to delete original file
+                        val originalDeleted = deleteOriginalUri(context, uri)
+                        ImportResult.Success(fileName, originalDeleted)
+                    } else {
+                        ImportResult.EncryptionError(result.exceptionOrNull()?.message ?: "")
+                    }
                 }
 
-                // 1. Retrieve original name
-                val fileName = getFileName(context, uri) ?: "unnamed_file"
-
-                // 2. Read bytes using ContentResolver
-                val fileBytes = context.contentResolver.openInputStream(uri)?.use { inputStream ->
-                    inputStream.readBytes()
-                } ?: throw IllegalArgumentException(context.getString(R.string.error_could_not_read_file))
-
-                // 3. Encrypt and save using Repository (storing original uri string)
-                val result = repository.encryptAndSaveFile(
-                    originalName = fileName,
-                    fileBytes = fileBytes,
-                    password = filePassword,
-                    originalPath = uri.toString()
-                )
-
-                if (result.isSuccess) {
-                    // 4. Move file: attempt to delete the original file
-                    val originalDeleted = deleteOriginalUri(context, uri)
-                    val msg = if (originalDeleted) {
-                        UiText.StringResource(R.string.msg_file_encrypted_and_moved, fileName)
-                    } else {
-                        UiText.StringResource(R.string.msg_file_encrypted, fileName)
-                    }
-                    _uiState.update {
-                        it.copy(isLoading = false, userMessage = msg)
-                    }
-                } else {
-                    _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            userMessage = UiText.StringResource(
-                                R.string.error_during_encryption,
-                                result.exceptionOrNull()?.message ?: ""
+                // Update UI on main thread based on result
+                when (importResult) {
+                    is ImportResult.TooLarge -> {
+                        _uiState.update {
+                            it.copy(
+                                isLoading = false,
+                                userMessage = UiText.StringResource(R.string.error_file_too_large, importResult.sizeMb)
                             )
-                        )
+                        }
+                    }
+                    is ImportResult.Success -> {
+                        val msg = if (importResult.originalDeleted) {
+                            UiText.StringResource(R.string.msg_file_encrypted_and_moved, importResult.fileName)
+                        } else {
+                            UiText.StringResource(R.string.msg_file_encrypted, importResult.fileName)
+                        }
+                        _uiState.update {
+                            it.copy(isLoading = false, userMessage = msg)
+                        }
+                    }
+                    is ImportResult.EncryptionError -> {
+                        _uiState.update {
+                            it.copy(
+                                isLoading = false,
+                                userMessage = UiText.StringResource(
+                                    R.string.error_during_encryption,
+                                    importResult.errorMessage
+                                )
+                            )
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -139,15 +280,21 @@ class VaultViewModel(
         }
     }
 
+    private sealed class ImportResult {
+        data class TooLarge(val sizeMb: String) : ImportResult()
+        data class Success(val fileName: String, val originalDeleted: Boolean) : ImportResult()
+        data class EncryptionError(val errorMessage: String) : ImportResult()
+    }
+
     /**
-     * Decrypts a file in memory for extraction out of the vault.
+     * Decrypts a file in memory for extraction out of vault.
      */
     fun decryptForExtraction(
         metadata: FileMetadata,
         password: String,
         onSuccess: (ByteArray) -> Unit
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(exceptionHandler) {
             _uiState.update { it.copy(isLoading = true) }
 
             val result = repository.decryptFile(metadata, password)
@@ -170,7 +317,7 @@ class VaultViewModel(
     }
 
     /**
-     * Finalizes extraction by writing the decrypted bytes to the destination URI and removing the file from the vault.
+     * Finalizes extraction by writing decrypted bytes to destination URI and removing file from vault.
      */
     fun finalizeExtraction(
         context: Context,
@@ -178,7 +325,7 @@ class VaultViewModel(
         bytes: ByteArray,
         metadata: FileMetadata
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(exceptionHandler) {
             _uiState.update { it.copy(isLoading = true) }
 
             try {
@@ -210,7 +357,7 @@ class VaultViewModel(
     }
 
     /**
-     * Attempts to delete the source URI to complete the "move" operation.
+     * Attempts to delete source URI to complete "move" operation.
      */
     private fun deleteOriginalUri(context: Context, uri: Uri): Boolean {
         return try {
@@ -233,15 +380,21 @@ class VaultViewModel(
     }
 
     /**
-     * Delete the file metadata from Room and physical file from internal storage.
+     * Delete file metadata from Room and physical file from internal storage.
      */
     fun deleteFile(metadata: FileMetadata) {
-        viewModelScope.launch {
-            val result = repository.deleteFile(metadata)
-            if (result.isSuccess) {
-                _uiState.update { it.copy(userMessage = UiText.StringResource(R.string.msg_file_deleted)) }
-            } else {
-                _uiState.update { it.copy(userMessage = UiText.StringResource(R.string.error_deleting_file)) }
+        viewModelScope.launch(exceptionHandler) {
+            try {
+                val result = repository.deleteFile(metadata)
+                if (result.isSuccess) {
+                    _uiState.update { it.copy(userMessage = UiText.StringResource(R.string.msg_file_deleted)) }
+                } else {
+                    _uiState.update { it.copy(userMessage = UiText.StringResource(R.string.error_deleting_file)) }
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(userMessage = UiText.StringResource(R.string.error_generic, e.message ?: ""))
+                }
             }
         }
     }
@@ -250,9 +403,6 @@ class VaultViewModel(
         _uiState.update { it.copy(userMessage = null) }
     }
 
-    /**
-     * Utility for extracting the actual file name from an Android URI.
-     */
     private fun getFileName(context: Context, uri: Uri): String? {
         var name: String? = null
         if (uri.scheme == "content") {
@@ -266,9 +416,6 @@ class VaultViewModel(
         return name ?: uri.lastPathSegment
     }
 
-    /**
-     * Utility for querying file size efficiently from URI metadata.
-     */
     private fun getFileSize(context: Context, uri: Uri): Long {
         var size: Long = -1
         if (uri.scheme == "content") {
@@ -285,24 +432,20 @@ class VaultViewModel(
         return size
     }
 
-    /** Called when user taps a file card: triggers password prompt dialog. */
     fun onFileClick(metadata: FileMetadata) {
         _uiState.update { it.copy(fileToOpen = metadata) }
     }
 
-    /** Called when user cancels file password dialog. */
     fun dismissOpenDialog() {
         _uiState.update { it.copy(fileToOpen = null) }
     }
 
-    /** Called when user closes file viewer. */
     fun closeViewer() {
         _uiState.update { it.copy(openedFile = null) }
     }
 
-    /** Decrypts and opens a file using the provided password. */
     fun openFile(metadata: FileMetadata, password: String) {
-        viewModelScope.launch {
+        viewModelScope.launch(exceptionHandler) {
             _uiState.update { it.copy(isLoading = true, fileToOpen = null) }
 
             val result = repository.decryptFile(metadata, password)
@@ -333,12 +476,15 @@ class VaultViewModel(
         }
     }
 
-    /** Factory to instantiate ViewModel with repository. */
-    class Factory(private val repository: VaultRepository) : ViewModelProvider.Factory {
+    /** Factory to instantiate ViewModel with repository & security preferences. */
+    class Factory(
+        private val repository: VaultRepository,
+        private val securityPreferences: SecurityPreferencesRepository
+    ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             if (modelClass.isAssignableFrom(VaultViewModel::class.java)) {
-                return VaultViewModel(repository) as T
+                return VaultViewModel(repository, securityPreferences) as T
             }
             throw IllegalArgumentException("Unknown ViewModel class")
         }

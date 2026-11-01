@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -37,6 +38,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Fingerprint
 import androidx.compose.material.icons.outlined.IosShare
 import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.Lock
@@ -54,6 +56,7 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
@@ -87,12 +90,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.fragment.app.FragmentActivity
+import com.tuidev.ramlock.R
 import com.tuidev.ramlock.data.FileMetadata
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import androidx.core.net.toUri
-import com.tuidev.ramlock.R
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -103,6 +106,10 @@ fun VaultScreen(
     val uiState by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
+
+    val isBiometricsEnabled by viewModel.isBiometricsEnabled.collectAsState()
+    val masterPin by viewModel.masterPin.collectAsState()
+    val panicPin by viewModel.panicPin.collectAsState()
 
     // State for pending file import
     var pendingImportUri by remember { mutableStateOf<Uri?>(null) }
@@ -117,6 +124,22 @@ fun VaultScreen(
 
     // State for options/settings dialog
     var showOptionsDialog by remember { mutableStateOf(false) }
+
+    val triggerBiometricPrompt: () -> Unit = {
+        (context as? FragmentActivity)?.let { activity ->
+            if (BiometricPromptHelper.isBiometricAvailable(activity)) {
+                BiometricPromptHelper.showBiometricPrompt(
+                    activity = activity,
+                    title = activity.getString(R.string.biometric_prompt_title),
+                    subtitle = activity.getString(R.string.biometric_prompt_subtitle),
+                    negativeButtonText = activity.getString(R.string.biometric_prompt_cancel),
+                    onSuccess = { viewModel.unlockVaultWithBiometrics() },
+                    onError = { _ -> },
+                    onCancel = { }
+                )
+            }
+        }
+    }
 
     // SAF Document Creator launcher pre-opening original folder if available
     val extractSaverLauncher = rememberLauncherForActivityResult(
@@ -142,7 +165,7 @@ fun VaultScreen(
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 metadata.originalPath?.let { pathString ->
                     try {
-                        val initialUri = pathString.toUri()
+                        val initialUri = Uri.parse(pathString)
                         putExtra(DocumentsContract.EXTRA_INITIAL_URI, initialUri)
                     } catch (_: Exception) {}
                 }
@@ -162,9 +185,8 @@ fun VaultScreen(
                     Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                 )
             } catch (_: Exception) {}
-
             pendingImportUri = selectedUri
-            pendingImportName = getUriDisplayName(context, selectedUri) ?: context.getString(R.string.unnamed_file)
+            pendingImportName = selectedUri.lastPathSegment ?: "unnamed_file"
         }
     }
 
@@ -178,7 +200,14 @@ fun VaultScreen(
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        snackbarHost = {
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier
+                    .navigationBarsPadding()
+                    .imePadding()
+            )
+        },
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
@@ -295,7 +324,12 @@ fun VaultScreen(
                 .padding(innerPadding)
         ) {
             if (!uiState.isUnlocked) {
-                LockView(onUnlock = { password -> viewModel.unlockVault(password) })
+                LockView(
+                    isBiometricsEnabled = isBiometricsEnabled,
+                    errorMessage = uiState.userMessage?.asString(context),
+                    onUnlock = { password -> viewModel.unlockVault(password) },
+                    onBiometricUnlock = triggerBiometricPrompt
+                )
             } else {
                 if (uiState.files.isEmpty()) {
                     EmptyVaultView()
@@ -378,9 +412,18 @@ fun VaultScreen(
             )
         }
 
-        // Dialog: Options / Settings
+        // Dialog: Security Options / Settings
         if (showOptionsDialog) {
-            VaultOptionsDialog(onDismiss = { showOptionsDialog = false })
+            SecuritySettingsDialog(
+                initialPin = masterPin,
+                initialBiometricsEnabled = isBiometricsEnabled,
+                initialPanicPin = panicPin,
+                onSave = { pin, enableBiometrics, panicPinVal ->
+                    viewModel.saveSecuritySettings(pin, enableBiometrics, panicPinVal)
+                    showOptionsDialog = false
+                },
+                onDismiss = { showOptionsDialog = false }
+            )
         }
 
         // Decrypt password dialog when opening a file
@@ -405,10 +448,20 @@ fun VaultScreen(
 
 @Composable
 private fun LockView(
-    onUnlock: (String) -> Unit
+    isBiometricsEnabled: Boolean,
+    errorMessage: String? = null,
+    onUnlock: (String) -> Unit,
+    onBiometricUnlock: () -> Unit
 ) {
     var passwordInput by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
+
+    // Auto-launch biometric prompt on lock view launch if biometrics is enabled
+    LaunchedEffect(isBiometricsEnabled) {
+        if (isBiometricsEnabled) {
+            onBiometricUnlock()
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -456,7 +509,7 @@ private fun LockView(
             modifier = Modifier.padding(horizontal = 16.dp)
         )
 
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(28.dp))
 
         OutlinedTextField(
             value = passwordInput,
@@ -488,7 +541,33 @@ private fun LockView(
             modifier = Modifier.fillMaxWidth()
         )
 
-        Spacer(modifier = Modifier.height(20.dp))
+        if (!errorMessage.isNullOrBlank()) {
+            Spacer(modifier = Modifier.height(10.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Warning,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = errorMessage,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(18.dp))
 
         Button(
             onClick = { onUnlock(passwordInput) },
@@ -506,6 +585,31 @@ private fun LockView(
                 text = stringResource(R.string.unlock_vault),
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
             )
+        }
+
+        if (isBiometricsEnabled) {
+            Spacer(modifier = Modifier.height(12.dp))
+            OutlinedButton(
+                onClick = onBiometricUnlock,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                shape = RoundedCornerShape(50),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Fingerprint,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = stringResource(R.string.unlock_with_biometrics),
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
         }
     }
 }
@@ -959,105 +1063,6 @@ fun DeleteConfirmationDialog(
     )
 }
 
-// Dialog: Options / Settings placeholders
-@Composable
-fun VaultOptionsDialog(
-    onDismiss: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(24.dp),
-        containerColor = MaterialTheme.colorScheme.surface,
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = Icons.Outlined.Settings,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(22.dp)
-                )
-                Spacer(modifier = Modifier.width(10.dp))
-                Text(
-                    text = stringResource(R.string.vault_configuration),
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                )
-            }
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Key,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(22.dp)
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                text = stringResource(R.string.change_password_fingerprint),
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
-                            )
-                            Text(
-                                text = stringResource(R.string.soon),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Warning,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.size(22.dp)
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                text = stringResource(R.string.panic_password),
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
-                            )
-                            Text(
-                                text = stringResource(R.string.soon),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.close), fontWeight = FontWeight.Bold)
-            }
-        }
-    )
-}
-
 @Composable
 fun DecryptPasswordDialog(
     fileName: String,
@@ -1190,8 +1195,13 @@ fun FileViewerDialog(
 
                     else -> {
                         LaunchedEffect(openedFile) {
-                            openWithSystemApp(context, openedFile)
-                            onDismiss()
+                            try {
+                                openWithSystemApp(context, openedFile)
+                            } catch (e: Exception) {
+                                android.util.Log.e("RamLock", "Error opening file externally", e)
+                            } finally {
+                                onDismiss()
+                            }
                         }
                         Box(
                             modifier = Modifier.fillMaxWidth(),
@@ -1212,21 +1222,29 @@ fun FileViewerDialog(
 }
 
 private fun openWithSystemApp(context: android.content.Context, openedFile: OpenedFile) {
-    val cacheFile = java.io.File(context.cacheDir, openedFile.name)
-    cacheFile.writeBytes(openedFile.bytes)
+    try {
+        val cacheFile = java.io.File(context.cacheDir, openedFile.name)
+        cacheFile.writeBytes(openedFile.bytes)
 
-    val uri = androidx.core.content.FileProvider.getUriForFile(
-        context,
-        "${context.packageName}.fileprovider",
-        cacheFile
-    )
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            cacheFile
+        )
 
-    val intent = Intent(Intent.ACTION_VIEW).apply {
-        setDataAndType(uri, getMimeType(openedFile.name))
-        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, getMimeType(openedFile.name))
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+
+        val chooser = Intent.createChooser(intent, context.getString(R.string.open_with)).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(chooser)
+    } catch (e: Exception) {
+        android.util.Log.e("RamLock", "Error launching external app chooser", e)
     }
-
-    context.startActivity(Intent.createChooser(intent, context.getString(R.string.open_with)))
 }
 
 private fun getUriDisplayName(context: android.content.Context, uri: Uri): String? {

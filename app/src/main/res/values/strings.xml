@@ -53,4 +53,44 @@
     <string name="error_saving_extracted_file">Error saving extracted file: %1$s</string>
     <string name="msg_file_deleted">File removed from vault</string>
     <string name="error_deleting_file">Error deleting file</string>
+
+    <!-- Onboarding Strings -->
+    <string name="onboarding_welcome_title">Welcome to RamLock</string>
+    <string name="onboarding_welcome_subtitle">The zero-trace, ephemeral in-RAM vault for your most confidential files.</string>
+    <string name="onboarding_features_title">Uncompromising Security</string>
+    <string name="onboarding_features_subtitle">Files are encrypted with Rust-powered AES-256-GCM and Argon2. Decryption keys exist only in RAM during active sessions.</string>
+    <string name="onboarding_setup_title">Security Setup</string>
+    <string name="onboarding_setup_subtitle">Configure how you want to unlock your vault. You must choose at least one authentication method.</string>
+    <string name="onboarding_pin_label">Master PIN / Password</string>
+    <string name="onboarding_pin_placeholder">Enter Master PIN or password</string>
+    <string name="onboarding_biometrics_label">Enable Fingerprint / Biometric Unlock</string>
+    <string name="onboarding_biometrics_desc">Use device fingerprint or face to quickly unlock the vault</string>
+    <string name="onboarding_panic_switch">Configure Panic Key (Optional)</string>
+    <string name="onboarding_panic_desc">Entering this key during unlock will permanently wipe all vault data instantly</string>
+    <string name="onboarding_panic_label">Panic Key / Password</string>
+    <string name="onboarding_panic_placeholder">Enter panic key</string>
+    <string name="error_same_panic_and_master_pin">Master key and Panic key cannot be the same.</string>
+    <string name="onboarding_validation_warning">Select at least one authentication method (PIN or Fingerprint) to continue.</string>
+    <string name="onboarding_btn_next">Next</string>
+    <string name="onboarding_btn_back">Back</string>
+    <string name="onboarding_btn_finish">Finish Setup</string>
+
+    <!-- Biometric & Unlock Strings -->
+    <string name="biometric_prompt_title">Unlock RamLock Vault</string>
+    <string name="biometric_prompt_subtitle">Authenticate with fingerprint or face to decrypt session</string>
+    <string name="biometric_prompt_cancel">Use Master PIN</string>
+    <string name="panic_wipe_success">Emergency Panic Key activated: All vault data permanently wiped.</string>
+    <string name="unlock_with_biometrics">Unlock with Fingerprint</string>
+
+    <!-- Settings / Security Options Strings -->
+    <string name="settings_security_title">Security Settings</string>
+    <string name="settings_master_pin_title">Master PIN / Password</string>
+    <string name="settings_master_pin_desc">Change your main unlock PIN</string>
+    <string name="settings_biometrics_title">Fingerprint Unlock</string>
+    <string name="settings_biometrics_desc">Quickly authenticate with biometrics</string>
+    <string name="settings_panic_title">Panic Key (Emergency Wipe)</string>
+    <string name="settings_panic_desc">Wipes all vault data if entered at login</string>
+    <string name="settings_rule_error">You must keep at least one authentication method active (PIN or Fingerprint).</string>
+    <string name="settings_save_success">Security settings updated successfully.</string>
+    <string name="settings_save_button">Save Settings</string>
 </resources>
