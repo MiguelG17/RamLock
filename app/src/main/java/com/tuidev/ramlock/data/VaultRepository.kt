@@ -10,20 +10,29 @@ class VaultRepository(
     private val storage: VaultFileStorage
 ) {
 
-    // 1. Reactive file flow for the UI
+    // Reactive file flow for the UI
     val allFiles: Flow<List<FileMetadata>> = dao.getAllFiles()
 
     /**
-     * Encrypt the bytes using Rust, save them to the private storage and record the metadata in Room.
+     * Checks if the physical encrypted file is missing from disk.
+     */
+    fun isFileOrphaned(encryptedFileName: String): Boolean {
+        return !storage.fileExists(encryptedFileName)
+    }
+
+    /**
+     * Encrypt the bytes using Rust, save them to private storage and record metadata in Room.
      */
     suspend fun encryptAndSaveFile(
         originalName: String,
         fileBytes: ByteArray,
-        password: String
+        password: String,
+        originalPath: String? = null
     ): Result<FileMetadata> = withContext(Dispatchers.IO) {
         try {
             // A. Native in-memory encryption with Rust
             val encryptedBytes = SecurityCore.encryptData(password, fileBytes)
+                ?: return@withContext Result.failure(IllegalStateException("Failed to encrypt file data"))
 
             // B. Physical storage in the internal sandbox
             val encryptedFileName = storage.saveEncryptedFile(encryptedBytes)
@@ -32,7 +41,8 @@ class VaultRepository(
             val metadata = FileMetadata(
                 originalName = originalName,
                 encryptedFileName = encryptedFileName,
-                fileSize = fileBytes.size.toLong()
+                fileSize = fileBytes.size.toLong(),
+                originalPath = originalPath
             )
             val generatedId = dao.insertFile(metadata)
 
@@ -43,18 +53,19 @@ class VaultRepository(
     }
 
     /**
-     * Read the bytes from the private disk and decrypt them using Rust with the given password.
+     * Read bytes from private disk and decrypt them using Rust with the given password.
      */
     suspend fun decryptFile(
         metadata: FileMetadata,
         password: String
     ): Result<ByteArray> = withContext(Dispatchers.IO) {
         try {
-            // A. Read the encrypted bytes from the sandbox
+            // A. Read encrypted bytes from sandbox
             val encryptedBytes = storage.readEncryptedFile(metadata.encryptedFileName)
 
-            // B. Native decryption using Rust
+            // B. Decrypt with Rust (returns null if password is invalid)
             val decryptedBytes = SecurityCore.decryptData(password, encryptedBytes)
+                ?: return@withContext Result.failure(IllegalArgumentException("Incorrect password or corrupted file"))
 
             Result.success(decryptedBytes)
         } catch (e: Exception) {
@@ -63,7 +74,7 @@ class VaultRepository(
     }
 
     /**
-     * Deletes the physical file from the disk and its entry in the database.
+     * Deletes the physical file from disk and its entry in database.
      */
     suspend fun deleteFile(metadata: FileMetadata): Result<Unit> = withContext(Dispatchers.IO) {
         try {
@@ -73,6 +84,19 @@ class VaultRepository(
             // B. Delete from Room
             dao.deleteFile(metadata)
 
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Complete panic wipe: Purges all files from private storage and wipes Room DB records.
+     */
+    suspend fun wipeAllVaultFiles(): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            storage.clearAllFiles()
+            dao.deleteAllFiles()
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
