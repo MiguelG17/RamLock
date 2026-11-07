@@ -173,3 +173,64 @@ pub extern "system" fn Java_com_tuidev_ramlock_security_SecurityCore_helloFromRu
         Err(_) => std::ptr::null_mut(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_derive_key_and_zeroize_password() {
+        let mut password = String::from("SuperSecretPassword2026!");
+        let salt = [0x42u8; 16];
+        let key_result = SecureKey::derive_from_password(&mut password, &salt);
+
+        assert!(key_result.is_ok(), "Key derivation should succeed");
+        let key = key_result.unwrap();
+        assert_eq!(key.bytes.len(), 32);
+        assert_ne!(key.bytes, [0u8; 32]);
+        assert_eq!(password, "", "Password string should be zeroized after key derivation");
+    }
+
+    #[test]
+    fn test_encrypt_and_decrypt_success() {
+        let mut password = String::from("CorrectPassword123");
+        let salt = [0x01u8; 16];
+        let key = SecureKey::derive_from_password(&mut password, &salt).unwrap();
+
+        let original_data = b"RamLock Secure Local Encrypted Payload";
+        let encrypted_payload = key.encrypt_data(original_data).expect("Encryption should succeed");
+
+        assert!(encrypted_payload.len() >= 12 + original_data.len() + 16);
+
+        let decrypted_bytes = key.decrypt_data(&encrypted_payload).expect("Decryption should succeed");
+        assert_eq!(decrypted_bytes, original_data);
+    }
+
+    #[test]
+    fn test_decrypt_with_wrong_password_fails() {
+        let salt = [0x99u8; 16];
+
+        let mut correct_pass = String::from("RightPassword");
+        let correct_key = SecureKey::derive_from_password(&mut correct_pass, &salt).unwrap();
+
+        let original_data = b"Confidential Document Content";
+        let encrypted_payload = correct_key.encrypt_data(original_data).unwrap();
+
+        let mut wrong_pass = String::from("WrongPassword");
+        let wrong_key = SecureKey::derive_from_password(&mut wrong_pass, &salt).unwrap();
+
+        let decrypt_result = wrong_key.decrypt_data(&encrypted_payload);
+        assert!(decrypt_result.is_err(), "Decryption with wrong key must fail");
+    }
+
+    #[test]
+    fn test_decrypt_invalid_payload_length() {
+        let mut pass = String::from("TestPass");
+        let salt = [0x12u8; 16];
+        let key = SecureKey::derive_from_password(&mut pass, &salt).unwrap();
+
+        let short_payload = vec![0u8; 10];
+        let result = key.decrypt_data(&short_payload);
+        assert!(result.is_err());
+    }
+}

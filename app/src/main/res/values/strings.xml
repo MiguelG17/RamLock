@@ -90,6 +90,8 @@
     <string name="settings_biometrics_desc">Quickly authenticate with biometrics</string>
     <string name="settings_panic_title">Panic Key (Emergency Wipe)</string>
     <string name="settings_panic_desc">Wipes all vault data if entered at login</string>
+    <string name="placeholder_keep_existing_pin">Leave blank to keep current PIN</string>
+    <string name="placeholder_keep_existing_panic">Leave blank to keep current Panic key</string>
     <string name="settings_rule_error">You must keep at least one authentication method active (PIN or Fingerprint).</string>
     <string name="settings_save_success">Security settings updated successfully.</string>
     <string name="settings_save_button">Save Settings</string>

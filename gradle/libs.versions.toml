@@ -1,5 +1,5 @@
 [versions]
-agp = "9.4.1"
+agp = "9.5.1"
 coreKtx = "1.13.1"
 coreSplashscreen = "1.0.1"
 datastore = "1.1.1"
@@ -15,7 +15,10 @@ kotlin = "2.2.10"
 composeBom = "2026.02.01"
 room3Runtime = "3.0.3"
 room = "2.6.1"
-ksp = "2.2.10-2.0.2"
+ksp = "2.3.6"
+coroutinesTest = "1.8.1"
+mockito = "5.11.0"
+mockitoKotlin = "5.3.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -28,6 +31,9 @@ androidx-room-runtime = { group = "androidx.room", name = "room-runtime", versio
 androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
 androidx-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
+kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutinesTest" }
+mockito-core = { group = "org.mockito", name = "mockito-core", version.ref = "mockito" }
+mockito-kotlin = { group = "org.mockito.kotlin", name = "mockito-kotlin", version.ref = "mockitoKotlin" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
 androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycleRuntimeKtx" }

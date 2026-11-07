@@ -51,25 +51,26 @@ import com.tuidev.ramlock.R
 
 @Composable
 fun SecuritySettingsDialog(
-    initialPin: String?,
+    hasMasterPin: Boolean = true,
     initialBiometricsEnabled: Boolean,
-    initialPanicPin: String?,
+    hasPanicPin: Boolean = false,
     onSave: (pin: String?, enableBiometrics: Boolean, panicPin: String?) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var pinInput by remember { mutableStateOf(initialPin ?: "") }
+    var pinInput by remember { mutableStateOf("") }
     var pinVisible by remember { mutableStateOf(false) }
 
     var isBiometricsEnabled by remember { mutableStateOf(initialBiometricsEnabled) }
 
-    var isPanicEnabled by remember { mutableStateOf(!initialPanicPin.isNullOrBlank()) }
-    var panicInput by remember { mutableStateOf(initialPanicPin ?: "") }
+    var isPanicEnabled by remember { mutableStateOf(hasPanicPin) }
+    var panicInput by remember { mutableStateOf("") }
     var panicVisible by remember { mutableStateOf(false) }
 
-    // Validation rules: Master PIN is required, panic PIN (if enabled) must be non-blank, and Master PIN != Panic PIN
+    // Validation rules:
+    val isMasterValid = hasMasterPin || pinInput.isNotBlank()
+    val isPanicValid = !isPanicEnabled || (hasPanicPin && panicInput.isBlank()) || panicInput.isNotBlank()
     val isSameKey = isPanicEnabled && panicInput.isNotBlank() && pinInput.isNotBlank() && pinInput.trim() == panicInput.trim()
-    val isPanicValid = !isPanicEnabled || panicInput.isNotBlank()
-    val isValid = pinInput.isNotBlank() && isPanicValid && !isSameKey
+    val isValid = isMasterValid && isPanicValid && !isSameKey
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -103,7 +104,12 @@ fun SecuritySettingsDialog(
                     value = pinInput,
                     onValueChange = { pinInput = it },
                     label = { Text(stringResource(R.string.settings_master_pin_title)) },
-                    placeholder = { Text(stringResource(R.string.onboarding_pin_placeholder)) },
+                    placeholder = {
+                        Text(
+                            if (hasMasterPin) stringResource(R.string.placeholder_keep_existing_pin)
+                            else stringResource(R.string.onboarding_pin_placeholder)
+                        )
+                    },
                     singleLine = true,
                     visualTransformation = if (pinVisible) VisualTransformation.None else PasswordVisualTransformation(),
                     leadingIcon = {
@@ -225,7 +231,12 @@ fun SecuritySettingsDialog(
                                     value = panicInput,
                                     onValueChange = { panicInput = it },
                                     label = { Text(stringResource(R.string.onboarding_panic_label)) },
-                                    placeholder = { Text(stringResource(R.string.onboarding_panic_placeholder)) },
+                                    placeholder = {
+                                        Text(
+                                            if (hasPanicPin) stringResource(R.string.placeholder_keep_existing_panic)
+                                            else stringResource(R.string.onboarding_panic_placeholder)
+                                        )
+                                    },
                                     singleLine = true,
                                     visualTransformation = if (panicVisible) VisualTransformation.None else PasswordVisualTransformation(),
                                     trailingIcon = {
@@ -282,11 +293,13 @@ fun SecuritySettingsDialog(
             Button(
                 onClick = {
                     if (isValid) {
-                        onSave(
-                            pinInput.ifBlank { null },
-                            isBiometricsEnabled,
-                            if (isPanicEnabled) panicInput.ifBlank { null } else null
-                        )
+                        val finalMasterPin = if (pinInput.isNotBlank()) pinInput else null
+                        val finalPanicPin = if (isPanicEnabled) {
+                            if (panicInput.isNotBlank()) panicInput else null
+                        } else {
+                            ""
+                        }
+                        onSave(finalMasterPin, isBiometricsEnabled, finalPanicPin)
                     }
                 },
                 enabled = isValid,

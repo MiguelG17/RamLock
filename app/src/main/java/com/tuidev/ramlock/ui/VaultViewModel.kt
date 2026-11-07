@@ -55,14 +55,14 @@ class VaultViewModel(
     val isBiometricsEnabled: StateFlow<Boolean> = securityPreferences.isBiometricsEnabled
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
-    val masterPin: StateFlow<String?> = securityPreferences.masterPin
-        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    val hasMasterPin: StateFlow<Boolean> = securityPreferences.hasMasterPin
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     val isPanicEnabled: StateFlow<Boolean> = securityPreferences.isPanicEnabled
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
-    val panicPin: StateFlow<String?> = securityPreferences.panicPin
-        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    val hasPanicPin: StateFlow<Boolean> = securityPreferences.hasPanicPin
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     // Master session password stored exclusively in RAM
     private var currentPassword: String? = null
@@ -115,17 +115,13 @@ class VaultViewModel(
      */
     fun unlockVault(password: String) {
         viewModelScope.launch(exceptionHandler) {
-            val configuredPanic = securityPreferences.panicPin.first()
-            val panicActive = securityPreferences.isPanicEnabled.first()
-
             // Panic Key check: If entered key matches configured Panic Key, wipe everything instantly and enter empty vault
-            if (panicActive && !configuredPanic.isNullOrBlank() && password == configuredPanic) {
+            if (securityPreferences.verifyPanicPin(password)) {
                 triggerPanicWipe(password)
                 return@launch
             }
 
-            val configuredMaster = securityPreferences.masterPin.first()
-            if (configuredMaster.isNullOrBlank() || password == configuredMaster) {
+            if (securityPreferences.verifyMasterPin(password)) {
                 currentPassword = password
                 _uiState.update { it.copy(isUnlocked = true, userMessage = null) }
             } else {
@@ -144,12 +140,6 @@ class VaultViewModel(
      */
     fun unlockVaultWithBiometrics() {
         viewModelScope.launch(exceptionHandler) {
-            val pin = securityPreferences.masterPin.first()
-            if (!pin.isNullOrBlank()) {
-                currentPassword = pin
-            } else {
-                currentPassword = "biometric_session_key"
-            }
             _uiState.update { it.copy(isUnlocked = true, userMessage = null) }
         }
     }
@@ -185,9 +175,42 @@ class VaultViewModel(
     /**
      * Lock the vault and wipe session password from RAM memory.
      */
-    fun lockVault() {
+    fun lockVault(context: Context? = null) {
         currentPassword = null
         _uiState.update { it.copy(isUnlocked = false) }
+        context?.let { clearTempCacheFiles(it) }
+    }
+
+    /**
+     * Securely shreds (overwrites with zeros) and deletes all temporary decrypted files in cacheDir.
+     */
+    fun clearTempCacheFiles(context: Context) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val cacheDir = context.cacheDir
+                cacheDir.listFiles()?.forEach { file ->
+                    if (file.isFile) {
+                        try {
+                            val length = file.length()
+                            if (length > 0) {
+                                java.io.RandomAccessFile(file, "rw").use { raf ->
+                                    val zeroBytes = ByteArray(minOf(length.toInt(), 8192))
+                                    var remaining = length
+                                    while (remaining > 0) {
+                                        val writeSize = minOf(remaining, zeroBytes.size.toLong()).toInt()
+                                        raf.write(zeroBytes, 0, writeSize)
+                                        remaining -= writeSize
+                                    }
+                                }
+                            }
+                        } catch (_: Exception) {}
+                        file.delete()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("RamLock", "Error shredding temp cache files", e)
+            }
+        }
     }
 
     /**

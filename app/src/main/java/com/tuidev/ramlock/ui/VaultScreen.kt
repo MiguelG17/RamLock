@@ -108,8 +108,8 @@ fun VaultScreen(
     val context = LocalContext.current
 
     val isBiometricsEnabled by viewModel.isBiometricsEnabled.collectAsState()
-    val masterPin by viewModel.masterPin.collectAsState()
-    val panicPin by viewModel.panicPin.collectAsState()
+    val hasMasterPin by viewModel.hasMasterPin.collectAsState()
+    val hasPanicPin by viewModel.hasPanicPin.collectAsState()
 
     // State for pending file import
     var pendingImportUri by remember { mutableStateOf<Uri?>(null) }
@@ -415,9 +415,9 @@ fun VaultScreen(
         // Dialog: Security Options / Settings
         if (showOptionsDialog) {
             SecuritySettingsDialog(
-                initialPin = masterPin,
+                hasMasterPin = hasMasterPin,
                 initialBiometricsEnabled = isBiometricsEnabled,
-                initialPanicPin = panicPin,
+                hasPanicPin = hasPanicPin,
                 onSave = { pin, enableBiometrics, panicPinVal ->
                     viewModel.saveSecuritySettings(pin, enableBiometrics, panicPinVal)
                     showOptionsDialog = false
