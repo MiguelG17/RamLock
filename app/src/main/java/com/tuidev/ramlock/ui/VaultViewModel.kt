@@ -214,42 +214,57 @@ class VaultViewModel(
     }
 
     /**
-     * Reads the file selected by user using SAF, encrypts it with Rust using specified file password,
+     * Reads the file selected by user using SAF via streaming ParcelFileDescriptor,
+     * encrypts it with Rust using specified file password (constant ~1MB RAM),
      * saves it into private vault, and attempts to delete original source file.
      */
     fun importAndEncryptFile(context: Context, uri: Uri, filePassword: String) {
         viewModelScope.launch(exceptionHandler) {
-            _uiState.update { it.copy(isLoading = true) }
+            val fileName = getFileName(context, uri) ?: "unnamed_file"
+            val fileSize = getFileSize(context, uri)
+
+            _uiState.update {
+                it.copy(
+                    isLoading = true,
+                    operationProgress = OperationProgress(
+                        title = context.getString(R.string.progress_encrypting),
+                        fileName = fileName,
+                        bytesProcessed = 0L,
+                        totalBytes = fileSize
+                    )
+                )
+            }
 
             try {
                 // Move all heavy I/O off the main thread to prevent ANR
                 val importResult = withContext(Dispatchers.IO) {
-                    // Pre-check file size to prevent OutOfMemoryError
-                    val maxSizeBytes = 150L * 1024 * 1024 // 150 MB limit
-                    val fileSize = getFileSize(context, uri)
-                    if (fileSize > maxSizeBytes) {
-                        val sizeMb = String.format(Locale.US, "%.1f", fileSize / (1024f * 1024f))
-                        return@withContext ImportResult.TooLarge(sizeMb)
+                    // 1. Open source file descriptor via SAF (0-heap byte allocation)
+                    val sourcePfd = context.contentResolver.openFileDescriptor(uri, "r")
+                        ?: throw IllegalArgumentException(context.getString(R.string.error_could_not_read_file))
+
+                    // 2. Encrypt and save via native streaming (constant RAM regardless of file size)
+                    val result = sourcePfd.use { inStream ->
+                        repository.encryptAndSaveFileStream(
+                            originalName = fileName,
+                            sourcePfd = inStream,
+                            password = filePassword,
+                            fileSize = fileSize,
+                            originalPath = uri.toString(),
+                            onProgress = { processed, total ->
+                                _uiState.update { current ->
+                                    current.copy(
+                                        operationProgress = current.operationProgress?.copy(
+                                            bytesProcessed = processed,
+                                            totalBytes = total
+                                        )
+                                    )
+                                }
+                            }
+                        )
                     }
 
-                    // 1. Retrieve original name
-                    val fileName = getFileName(context, uri) ?: "unnamed_file"
-
-                    // 2. Read bytes using ContentResolver
-                    val fileBytes = context.contentResolver.openInputStream(uri)?.use { inputStream ->
-                        inputStream.readBytes()
-                    } ?: throw IllegalArgumentException(context.getString(R.string.error_could_not_read_file))
-
-                    // 3. Encrypt and save using Repository (storing original uri string)
-                    val result = repository.encryptAndSaveFile(
-                        originalName = fileName,
-                        fileBytes = fileBytes,
-                        password = filePassword,
-                        originalPath = uri.toString()
-                    )
-
                     if (result.isSuccess) {
-                        // 4. Move file: attempt to delete original file
+                        // 3. Move file: attempt to delete original file
                         val originalDeleted = deleteOriginalUri(context, uri)
                         ImportResult.Success(fileName, originalDeleted)
                     } else {
@@ -263,6 +278,7 @@ class VaultViewModel(
                         _uiState.update {
                             it.copy(
                                 isLoading = false,
+                                operationProgress = null,
                                 userMessage = UiText.StringResource(R.string.error_file_too_large, importResult.sizeMb)
                             )
                         }
@@ -274,13 +290,14 @@ class VaultViewModel(
                             UiText.StringResource(R.string.msg_file_encrypted, importResult.fileName)
                         }
                         _uiState.update {
-                            it.copy(isLoading = false, userMessage = msg)
+                            it.copy(isLoading = false, operationProgress = null, userMessage = msg)
                         }
                     }
                     is ImportResult.EncryptionError -> {
                         _uiState.update {
                             it.copy(
                                 isLoading = false,
+                                operationProgress = null,
                                 userMessage = UiText.StringResource(
                                     R.string.error_during_encryption,
                                     importResult.errorMessage
@@ -293,6 +310,7 @@ class VaultViewModel(
                 _uiState.update {
                     it.copy(
                         isLoading = false,
+                        operationProgress = null,
                         userMessage = UiText.StringResource(
                             R.string.error_generic,
                             e.message ?: ""
@@ -310,65 +328,79 @@ class VaultViewModel(
     }
 
     /**
-     * Decrypts a file in memory for extraction out of vault.
+     * Streams file decryption directly from vault storage into destination SAF URI with 0-heap allocation,
+     * showing progress and deleting file from vault upon success.
      */
-    fun decryptForExtraction(
+    fun extractFileToUri(
+        context: Context,
         metadata: FileMetadata,
         password: String,
-        onSuccess: (ByteArray) -> Unit
+        destinationUri: Uri
     ) {
         viewModelScope.launch(exceptionHandler) {
-            _uiState.update { it.copy(isLoading = true) }
-
-            val result = repository.decryptFile(metadata, password)
-
-            if (result.isSuccess) {
-                _uiState.update { it.copy(isLoading = false) }
-                onSuccess(result.getOrThrow())
-            } else {
-                val exception = result.exceptionOrNull()
-                val message = if (exception is FileNotFoundException) {
-                    UiText.StringResource(R.string.error_file_not_found_in_storage)
-                } else {
-                    UiText.StringResource(R.string.error_incorrect_password)
-                }
-                _uiState.update {
-                    it.copy(isLoading = false, userMessage = message)
-                }
+            _uiState.update {
+                it.copy(
+                    isLoading = true,
+                    operationProgress = OperationProgress(
+                        title = context.getString(R.string.progress_decrypting),
+                        fileName = metadata.originalName,
+                        bytesProcessed = 0L,
+                        totalBytes = metadata.fileSize
+                    )
+                )
             }
-        }
-    }
-
-    /**
-     * Finalizes extraction by writing decrypted bytes to destination URI and removing file from vault.
-     */
-    fun finalizeExtraction(
-        context: Context,
-        destinationUri: Uri,
-        bytes: ByteArray,
-        metadata: FileMetadata
-    ) {
-        viewModelScope.launch(exceptionHandler) {
-            _uiState.update { it.copy(isLoading = true) }
 
             try {
-                context.contentResolver.openOutputStream(destinationUri)?.use { outputStream ->
-                    outputStream.write(bytes)
-                } ?: throw IllegalArgumentException(context.getString(R.string.error_could_not_write_destination))
+                val result = withContext(Dispatchers.IO) {
+                    val destPfd = context.contentResolver.openFileDescriptor(destinationUri, "w")
+                        ?: return@withContext Result.failure(
+                            IllegalArgumentException(context.getString(R.string.error_could_not_write_destination))
+                        )
 
-                // Delete from vault repository (Room DB + internal file)
-                repository.deleteFile(metadata)
+                    destPfd.use { outStream ->
+                        repository.decryptToFileStream(
+                            metadata = metadata,
+                            password = password,
+                            destinationPfd = outStream,
+                            onProgress = { processed, total ->
+                                _uiState.update { current ->
+                                    current.copy(
+                                        operationProgress = current.operationProgress?.copy(
+                                            bytesProcessed = processed,
+                                            totalBytes = total
+                                        )
+                                    )
+                                }
+                            }
+                        )
+                    }
+                }
 
-                _uiState.update {
-                    it.copy(
-                        isLoading = false,
-                        userMessage = UiText.StringResource(R.string.msg_file_extracted, metadata.originalName)
-                    )
+                if (result.isSuccess) {
+                    repository.deleteFile(metadata)
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            operationProgress = null,
+                            userMessage = UiText.StringResource(R.string.msg_file_extracted, metadata.originalName)
+                        )
+                    }
+                } else {
+                    val exception = result.exceptionOrNull()
+                    val message = if (exception is FileNotFoundException) {
+                        UiText.StringResource(R.string.error_file_not_found_in_storage)
+                    } else {
+                        UiText.StringResource(R.string.error_incorrect_password)
+                    }
+                    _uiState.update {
+                        it.copy(isLoading = false, operationProgress = null, userMessage = message)
+                    }
                 }
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(
                         isLoading = false,
+                        operationProgress = null,
                         userMessage = UiText.StringResource(
                             R.string.error_saving_extracted_file,
                             e.message ?: ""
@@ -464,14 +496,16 @@ class VaultViewModel(
     }
 
     fun closeViewer() {
+        _uiState.value.openedFile?.file?.delete()
         _uiState.update { it.copy(openedFile = null) }
     }
 
-    fun openFile(metadata: FileMetadata, password: String) {
+    fun openFile(context: Context, metadata: FileMetadata, password: String) {
         viewModelScope.launch(exceptionHandler) {
             _uiState.update { it.copy(isLoading = true, fileToOpen = null) }
 
-            val result = repository.decryptFile(metadata, password)
+            val tempFile = File(context.cacheDir, "view_${System.currentTimeMillis()}_${metadata.originalName}")
+            val result = repository.decryptToTempFile(metadata, password, tempFile)
 
             if (result.isSuccess) {
                 val category = getFileCategory(metadata.originalName)
@@ -481,11 +515,12 @@ class VaultViewModel(
                         openedFile = OpenedFile(
                             name = metadata.originalName,
                             category = category,
-                            bytes = result.getOrThrow()
+                            file = tempFile
                         )
                     )
                 }
             } else {
+                tempFile.delete()
                 val exception = result.exceptionOrNull()
                 val message = if (exception is FileNotFoundException) {
                     UiText.StringResource(R.string.error_file_not_found_in_storage)

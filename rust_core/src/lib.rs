@@ -1,7 +1,10 @@
+pub mod stream;
+
 use argon2::Argon2;
 use jni::JNIEnv;
-use jni::objects::{JByteArray, JClass, JString};
-use jni::sys::{jbyteArray, jstring};
+use jni::objects::{JByteArray, JClass, JObject, JString};
+#[allow(unused_imports)]
+use jni::sys::{jboolean, jbyteArray, jint, jlong, jstring, JNI_FALSE, JNI_TRUE};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 // 1. THE SECURITY LOGIC (Rust's internal logic)
@@ -90,6 +93,7 @@ pub extern "system" fn Java_com_tuidev_ramlock_security_SecurityCore_encryptData
     let Ok(password_str) = env.get_string(&password) else {
         return std::ptr::null_mut();
     };
+    #[allow(unused_mut)]
     let mut password_rust: String = password_str.into();
 
     let Ok(plaintext_rust) = env.convert_byte_array(&data) else {
@@ -132,6 +136,7 @@ pub extern "system" fn Java_com_tuidev_ramlock_security_SecurityCore_decryptData
     let Ok(password_str) = env.get_string(&password) else {
         return std::ptr::null_mut();
     };
+    #[allow(unused_mut)]
     let mut password_rust: String = password_str.into();
 
     let Ok(payload_rust) = env.convert_byte_array(&data) else {
@@ -171,6 +176,136 @@ pub extern "system" fn Java_com_tuidev_ramlock_security_SecurityCore_helloFromRu
     match env.new_string(rust_string) {
         Ok(output) => output.into_raw(),
         Err(_) => std::ptr::null_mut(),
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_tuidev_ramlock_security_SecurityCore_encryptStream<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    password: JString<'local>,
+    fd_in: jint,
+    fd_out: jint,
+    total_bytes: jlong,
+    progress_listener: JObject<'local>,
+) -> jboolean {
+    let Ok(password_str) = env.get_string(&password) else {
+        return JNI_FALSE;
+    };
+    #[allow(unused_mut)]
+    let mut password_rust: String = password_str.into();
+
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::fd::{FromRawFd, IntoRawFd};
+        let mut file_in = unsafe { std::fs::File::from_raw_fd(fd_in) };
+        let mut file_out = unsafe { std::fs::File::from_raw_fd(fd_out) };
+
+        let result = {
+            let mut reader = std::io::BufReader::with_capacity(256 * 1024, &mut file_in);
+            let mut writer = std::io::BufWriter::with_capacity(256 * 1024, &mut file_out);
+
+            let has_listener = !progress_listener.as_raw().is_null();
+            let cb = if has_listener {
+                Some(|bytes: u64| {
+                    let _ = env.call_method(
+                        &progress_listener,
+                        "onProgress",
+                        "(JJ)V",
+                        &[
+                            jni::objects::JValue::Long(bytes as i64),
+                            jni::objects::JValue::Long(total_bytes),
+                        ],
+                    );
+                })
+            } else {
+                None
+            };
+
+            let res = stream::encrypt_stream_with_progress(&mut password_rust, &mut reader, &mut writer, cb);
+            let _ = writer.flush();
+            res
+        };
+
+        // Keep raw descriptors open for JVM caller
+        let _ = file_in.into_raw_fd();
+        let _ = file_out.into_raw_fd();
+
+        match result {
+            Ok(()) => JNI_TRUE,
+            Err(_) => JNI_FALSE,
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (fd_in, fd_out, password_rust, total_bytes, progress_listener);
+        JNI_FALSE
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_tuidev_ramlock_security_SecurityCore_decryptStream<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    password: JString<'local>,
+    fd_in: jint,
+    fd_out: jint,
+    total_bytes: jlong,
+    progress_listener: JObject<'local>,
+) -> jboolean {
+    let Ok(password_str) = env.get_string(&password) else {
+        return JNI_FALSE;
+    };
+    #[allow(unused_mut)]
+    let mut password_rust: String = password_str.into();
+
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::fd::{FromRawFd, IntoRawFd};
+        let mut file_in = unsafe { std::fs::File::from_raw_fd(fd_in) };
+        let mut file_out = unsafe { std::fs::File::from_raw_fd(fd_out) };
+
+        let result = {
+            let mut reader = std::io::BufReader::with_capacity(256 * 1024, &mut file_in);
+            let mut writer = std::io::BufWriter::with_capacity(256 * 1024, &mut file_out);
+
+            let has_listener = !progress_listener.as_raw().is_null();
+            let cb = if has_listener {
+                Some(|bytes: u64| {
+                    let _ = env.call_method(
+                        &progress_listener,
+                        "onProgress",
+                        "(JJ)V",
+                        &[
+                            jni::objects::JValue::Long(bytes as i64),
+                            jni::objects::JValue::Long(total_bytes),
+                        ],
+                    );
+                })
+            } else {
+                None
+            };
+
+            let res = stream::decrypt_stream_with_progress(&mut password_rust, &mut reader, &mut writer, cb);
+            let _ = writer.flush();
+            res
+        };
+
+        // Keep raw descriptors open for JVM caller
+        let _ = file_in.into_raw_fd();
+        let _ = file_out.into_raw_fd();
+
+        match result {
+            Ok(()) => JNI_TRUE,
+            Err(_) => JNI_FALSE,
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (fd_in, fd_out, password_rust, total_bytes, progress_listener);
+        JNI_FALSE
     }
 }
 
