@@ -25,6 +25,15 @@ pub fn encrypt_stream<R: Read, W: Write>(
     reader: &mut R,
     writer: &mut W,
 ) -> Result<(), String> {
+    encrypt_stream_with_progress(password, reader, writer, None::<fn(u64)>)
+}
+
+pub fn encrypt_stream_with_progress<R: Read, W: Write, F: FnMut(u64)>(
+    password: &mut String,
+    reader: &mut R,
+    writer: &mut W,
+    mut progress_cb: Option<F>,
+) -> Result<(), String> {
     // 1. Generate random salt (16 bytes) and nonce prefix (7 bytes)
     let mut salt = [0u8; 16];
     OsRng.fill_bytes(&mut salt);
@@ -45,7 +54,7 @@ pub fn encrypt_stream<R: Read, W: Write>(
     let cipher_key = GenericArray::from_slice(&key.bytes);
     let cipher = Aes256Gcm::new(cipher_key);
 
-    const CHUNK_SIZE: usize = 64 * 1024; // 64 KB
+    const CHUNK_SIZE: usize = 256 * 1024; // 256 KB (4x fewer I/O syscalls)
 
     // Zero allocations inside loop: allocate two buffers once before entering the loop
     let mut buf_current = vec![0u8; CHUNK_SIZE];
@@ -55,6 +64,7 @@ pub fn encrypt_stream<R: Read, W: Write>(
         .map_err(|e| format!("IO read error: {}", e))?;
 
     let mut chunk_counter: u32 = 0;
+    let mut total_processed: u64 = 0;
 
     loop {
         let next_bytes_read = read_full(reader, &mut buf_next)
@@ -78,6 +88,11 @@ pub fn encrypt_stream<R: Read, W: Write>(
         writer.write_all(&chunk_len).map_err(|e| format!("IO write error: {}", e))?;
         writer.write_all(&encrypted_chunk).map_err(|e| format!("IO write error: {}", e))?;
 
+        total_processed += bytes_read as u64;
+        if let Some(ref mut cb) = progress_cb {
+            cb(total_processed);
+        }
+
         if is_last == 1 {
             break;
         }
@@ -97,6 +112,15 @@ pub fn decrypt_stream<R: Read, W: Write>(
     password: &mut String,
     reader: &mut R,
     writer: &mut W,
+) -> Result<(), String> {
+    decrypt_stream_with_progress(password, reader, writer, None::<fn(u64)>)
+}
+
+pub fn decrypt_stream_with_progress<R: Read, W: Write, F: FnMut(u64)>(
+    password: &mut String,
+    reader: &mut R,
+    writer: &mut W,
+    mut progress_cb: Option<F>,
 ) -> Result<(), String> {
     // 1. Read header (28 bytes): 4B magic + 1B version + 16B salt + 7B nonce prefix
     let mut header = [0u8; 28];
@@ -132,8 +156,7 @@ pub fn decrypt_stream<R: Read, W: Write>(
     let cipher_key = GenericArray::from_slice(&key.bytes);
     let cipher = Aes256Gcm::new(cipher_key);
 
-    const CHUNK_SIZE: usize = 64 * 1024; // 64 KB
-    const MAX_CHUNK_LEN: usize = CHUNK_SIZE + 16; // 64 KB + 16B AES-GCM Auth Tag
+    const MAX_CHUNK_LEN: usize = 1024 * 1024 + 16; // Up to 1 MB per chunk (supports 64KB, 256KB, 1MB)
 
     // 4. Read initial 4-byte chunk length
     let mut len_buf = [0u8; 4];
@@ -147,6 +170,7 @@ pub fn decrypt_stream<R: Read, W: Write>(
     }
 
     let mut chunk_counter: u32 = 0;
+    let mut total_processed: u64 = 0;
 
     loop {
         let chunk_len = u32::from_be_bytes(len_buf) as usize;
@@ -197,6 +221,11 @@ pub fn decrypt_stream<R: Read, W: Write>(
         writer
             .write_all(&plaintext_chunk)
             .map_err(|e| format!("IO write error: {}", e))?;
+
+        total_processed += plaintext_chunk.len() as u64;
+        if let Some(ref mut cb) = progress_cb {
+            cb(total_processed);
+        }
 
         if is_last == 1 {
             break;
@@ -374,5 +403,39 @@ mod tests {
 
         let result = encrypt_stream(&mut password, &mut reader, &mut writer);
         assert!(result.is_ok(), "encrypt_stream should handle partial reads seamlessly");
+    }
+
+    #[test]
+    fn test_stream_progress_reporting() {
+        let payload = vec![0x55u8; 600 * 1024]; // 600 KB (spans multiple chunks)
+        let mut enc_pass = String::from("ProgressPass123");
+        let mut reader = Cursor::new(&payload);
+        let mut writer = Vec::new();
+
+        let mut enc_progress = Vec::new();
+        let enc_res = encrypt_stream_with_progress(
+            &mut enc_pass,
+            &mut reader,
+            &mut writer,
+            Some(|bytes| enc_progress.push(bytes)),
+        );
+        assert!(enc_res.is_ok());
+        assert!(!enc_progress.is_empty());
+        assert_eq!(*enc_progress.last().unwrap(), 600 * 1024);
+
+        let mut dec_pass = String::from("ProgressPass123");
+        let mut enc_reader = Cursor::new(writer);
+        let mut dec_writer = Vec::new();
+
+        let mut dec_progress = Vec::new();
+        let dec_res = decrypt_stream_with_progress(
+            &mut dec_pass,
+            &mut enc_reader,
+            &mut dec_writer,
+            Some(|bytes| dec_progress.push(bytes)),
+        );
+        assert!(dec_res.is_ok());
+        assert_eq!(*dec_progress.last().unwrap(), 600 * 1024);
+        assert_eq!(dec_writer, payload);
     }
 }

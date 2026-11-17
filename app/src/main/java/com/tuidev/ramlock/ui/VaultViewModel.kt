@@ -220,32 +220,51 @@ class VaultViewModel(
      */
     fun importAndEncryptFile(context: Context, uri: Uri, filePassword: String) {
         viewModelScope.launch(exceptionHandler) {
-            _uiState.update { it.copy(isLoading = true) }
+            val fileName = getFileName(context, uri) ?: "unnamed_file"
+            val fileSize = getFileSize(context, uri)
+
+            _uiState.update {
+                it.copy(
+                    isLoading = true,
+                    operationProgress = OperationProgress(
+                        title = context.getString(R.string.progress_encrypting),
+                        fileName = fileName,
+                        bytesProcessed = 0L,
+                        totalBytes = fileSize
+                    )
+                )
+            }
 
             try {
                 // Move all heavy I/O off the main thread to prevent ANR
                 val importResult = withContext(Dispatchers.IO) {
-                    // 1. Retrieve original name and size
-                    val fileName = getFileName(context, uri) ?: "unnamed_file"
-                    val fileSize = getFileSize(context, uri)
-
-                    // 2. Open source file descriptor via SAF (0-heap byte allocation)
+                    // 1. Open source file descriptor via SAF (0-heap byte allocation)
                     val sourcePfd = context.contentResolver.openFileDescriptor(uri, "r")
                         ?: throw IllegalArgumentException(context.getString(R.string.error_could_not_read_file))
 
-                    // 3. Encrypt and save via native streaming (constant RAM regardless of file size)
+                    // 2. Encrypt and save via native streaming (constant RAM regardless of file size)
                     val result = sourcePfd.use { inStream ->
                         repository.encryptAndSaveFileStream(
                             originalName = fileName,
                             sourcePfd = inStream,
                             password = filePassword,
                             fileSize = fileSize,
-                            originalPath = uri.toString()
+                            originalPath = uri.toString(),
+                            onProgress = { processed, total ->
+                                _uiState.update { current ->
+                                    current.copy(
+                                        operationProgress = current.operationProgress?.copy(
+                                            bytesProcessed = processed,
+                                            totalBytes = total
+                                        )
+                                    )
+                                }
+                            }
                         )
                     }
 
                     if (result.isSuccess) {
-                        // 4. Move file: attempt to delete original file
+                        // 3. Move file: attempt to delete original file
                         val originalDeleted = deleteOriginalUri(context, uri)
                         ImportResult.Success(fileName, originalDeleted)
                     } else {
@@ -259,6 +278,7 @@ class VaultViewModel(
                         _uiState.update {
                             it.copy(
                                 isLoading = false,
+                                operationProgress = null,
                                 userMessage = UiText.StringResource(R.string.error_file_too_large, importResult.sizeMb)
                             )
                         }
@@ -270,13 +290,14 @@ class VaultViewModel(
                             UiText.StringResource(R.string.msg_file_encrypted, importResult.fileName)
                         }
                         _uiState.update {
-                            it.copy(isLoading = false, userMessage = msg)
+                            it.copy(isLoading = false, operationProgress = null, userMessage = msg)
                         }
                     }
                     is ImportResult.EncryptionError -> {
                         _uiState.update {
                             it.copy(
                                 isLoading = false,
+                                operationProgress = null,
                                 userMessage = UiText.StringResource(
                                     R.string.error_during_encryption,
                                     importResult.errorMessage
@@ -289,6 +310,7 @@ class VaultViewModel(
                 _uiState.update {
                     it.copy(
                         isLoading = false,
+                        operationProgress = null,
                         userMessage = UiText.StringResource(
                             R.string.error_generic,
                             e.message ?: ""

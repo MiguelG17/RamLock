@@ -2,6 +2,7 @@ package com.tuidev.ramlock.data
 
 import android.os.ParcelFileDescriptor
 import com.tuidev.ramlock.security.SecurityCore
+import com.tuidev.ramlock.security.StreamProgressListener
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
@@ -32,7 +33,8 @@ class VaultRepository(
         sourcePfd: ParcelFileDescriptor,
         password: String,
         fileSize: Long,
-        originalPath: String? = null
+        originalPath: String? = null,
+        onProgress: ((bytesProcessed: Long, totalBytes: Long) -> Unit)? = null
     ): Result<FileMetadata> = withContext(Dispatchers.IO) {
         val targetFile = storage.createEncryptedFile()
         try {
@@ -41,8 +43,18 @@ class VaultRepository(
                 ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_WRITE_ONLY or ParcelFileDescriptor.MODE_TRUNCATE
             )
 
+            val listener = if (onProgress != null) StreamProgressListener { processed, total ->
+                onProgress(processed, total)
+            } else null
+
             val success = targetPfd.use { outStream ->
-                SecurityCore.encryptStream(password, sourcePfd.fd, outStream.fd)
+                SecurityCore.encryptStream(
+                    password = password,
+                    inFd = sourcePfd.fd,
+                    outFd = outStream.fd,
+                    totalBytes = fileSize,
+                    listener = listener
+                )
             }
 
             if (!success) {
@@ -72,13 +84,24 @@ class VaultRepository(
     suspend fun decryptToFileStream(
         metadata: FileMetadata,
         password: String,
-        destinationPfd: ParcelFileDescriptor
+        destinationPfd: ParcelFileDescriptor,
+        onProgress: ((bytesProcessed: Long, totalBytes: Long) -> Unit)? = null
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             if (storage.isStreamEncrypted(metadata.encryptedFileName)) {
                 val encPfd = storage.openEncryptedFilePfd(metadata.encryptedFileName)
+                val listener = if (onProgress != null) StreamProgressListener { processed, total ->
+                    onProgress(processed, total)
+                } else null
+
                 val success = encPfd.use { inStream ->
-                    SecurityCore.decryptStream(password, inStream.fd, destinationPfd.fd)
+                    SecurityCore.decryptStream(
+                        password = password,
+                        inFd = inStream.fd,
+                        outFd = destinationPfd.fd,
+                        totalBytes = metadata.fileSize,
+                        listener = listener
+                    )
                 }
                 if (!success) {
                     return@withContext Result.failure(IllegalArgumentException("Incorrect password or corrupted stream file"))

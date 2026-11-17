@@ -53,6 +53,8 @@
     <string name="error_saving_extracted_file">Error saving extracted file: %1$s</string>
     <string name="msg_file_deleted">File removed from vault</string>
     <string name="error_deleting_file">Error deleting file</string>
+    <string name="progress_encrypting">Encrypting file…</string>
+    <string name="progress_decrypting">Decrypting file…</string>
 
     <!-- Onboarding Strings -->
     <string name="onboarding_welcome_title">Welcome to RamLock</string>
