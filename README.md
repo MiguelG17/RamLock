@@ -26,6 +26,10 @@ RamLock follows Clean Architecture principles, ensuring a strict boundary betwee
 * **Data Layer (Kotlin):** Room Database for encrypted file metadata indexing, and Coroutines (`Dispatchers.IO`) for non-blocking JNI calls.
 * **Native Security Layer (Rust):** Shared library (`.so`) compiled via `rust-android-gradle` exposing a safe JNI bridge to Android.
 
+## 📖 Deep Technical Documentation
+
+For an exhaustive, deep-dive explanation of the cryptography, JNI zero-heap memory management, Rust streaming engine, and Android security hardening, read the [Technical Documentation](docs/TECHNICAL_DOCUMENTATION.md).
+
 ## 🚀 Getting Started
 
 ### Prerequisites
