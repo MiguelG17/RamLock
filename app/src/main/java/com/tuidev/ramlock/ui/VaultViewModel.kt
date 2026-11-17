@@ -214,7 +214,8 @@ class VaultViewModel(
     }
 
     /**
-     * Reads the file selected by user using SAF, encrypts it with Rust using specified file password,
+     * Reads the file selected by user using SAF via streaming ParcelFileDescriptor,
+     * encrypts it with Rust using specified file password (constant ~1MB RAM),
      * saves it into private vault, and attempts to delete original source file.
      */
     fun importAndEncryptFile(context: Context, uri: Uri, filePassword: String) {
@@ -224,29 +225,24 @@ class VaultViewModel(
             try {
                 // Move all heavy I/O off the main thread to prevent ANR
                 val importResult = withContext(Dispatchers.IO) {
-                    // Pre-check file size to prevent OutOfMemoryError
-                    val maxSizeBytes = 150L * 1024 * 1024 // 150 MB limit
-                    val fileSize = getFileSize(context, uri)
-                    if (fileSize > maxSizeBytes) {
-                        val sizeMb = String.format(Locale.US, "%.1f", fileSize / (1024f * 1024f))
-                        return@withContext ImportResult.TooLarge(sizeMb)
-                    }
-
-                    // 1. Retrieve original name
+                    // 1. Retrieve original name and size
                     val fileName = getFileName(context, uri) ?: "unnamed_file"
+                    val fileSize = getFileSize(context, uri)
 
-                    // 2. Read bytes using ContentResolver
-                    val fileBytes = context.contentResolver.openInputStream(uri)?.use { inputStream ->
-                        inputStream.readBytes()
-                    } ?: throw IllegalArgumentException(context.getString(R.string.error_could_not_read_file))
+                    // 2. Open source file descriptor via SAF (0-heap byte allocation)
+                    val sourcePfd = context.contentResolver.openFileDescriptor(uri, "r")
+                        ?: throw IllegalArgumentException(context.getString(R.string.error_could_not_read_file))
 
-                    // 3. Encrypt and save using Repository (storing original uri string)
-                    val result = repository.encryptAndSaveFile(
-                        originalName = fileName,
-                        fileBytes = fileBytes,
-                        password = filePassword,
-                        originalPath = uri.toString()
-                    )
+                    // 3. Encrypt and save via native streaming (constant RAM regardless of file size)
+                    val result = sourcePfd.use { inStream ->
+                        repository.encryptAndSaveFileStream(
+                            originalName = fileName,
+                            sourcePfd = inStream,
+                            password = filePassword,
+                            fileSize = fileSize,
+                            originalPath = uri.toString()
+                        )
+                    }
 
                     if (result.isSuccess) {
                         // 4. Move file: attempt to delete original file

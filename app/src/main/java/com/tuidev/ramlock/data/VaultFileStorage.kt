@@ -1,6 +1,7 @@
 package com.tuidev.ramlock.data
 
 import android.content.Context
+import android.os.ParcelFileDescriptor
 import java.io.File
 import java.io.FileNotFoundException
 import java.util.UUID
@@ -55,6 +56,52 @@ class VaultFileStorage(private val context: Context) {
      */
     fun fileExists(encryptedFileName: String): Boolean {
         return File(vaultDirectory, encryptedFileName).exists()
+    }
+
+    /**
+     * Creates a new unique file in the vault folder for streaming writes.
+     */
+    fun createEncryptedFile(): File {
+        val uniqueName = "${UUID.randomUUID()}.enc"
+        return File(vaultDirectory, uniqueName)
+    }
+
+    /**
+     * Gets the File reference for a stored encrypted file.
+     */
+    fun getEncryptedFile(encryptedFileName: String): File {
+        return File(vaultDirectory, encryptedFileName)
+    }
+
+    /**
+     * Opens a ParcelFileDescriptor for an encrypted file in vault storage.
+     */
+    fun openEncryptedFilePfd(
+        encryptedFileName: String,
+        mode: Int = ParcelFileDescriptor.MODE_READ_ONLY
+    ): ParcelFileDescriptor {
+        val targetFile = File(vaultDirectory, encryptedFileName)
+        if (!targetFile.exists()) {
+            throw FileNotFoundException("El archivo cifrado no existe en el almacenamiento privado.")
+        }
+        return ParcelFileDescriptor.open(targetFile, mode)
+    }
+
+    /**
+     * Inspects the first 4 bytes of an encrypted file to determine if it uses the RMLK stream format.
+     */
+    fun isStreamEncrypted(encryptedFileName: String): Boolean {
+        val targetFile = File(vaultDirectory, encryptedFileName)
+        if (!targetFile.exists() || targetFile.length() < 28) return false
+        return try {
+            targetFile.inputStream().use { stream ->
+                val magic = ByteArray(4)
+                val read = stream.read(magic)
+                read == 4 && magic.contentEquals(byteArrayOf('R'.code.toByte(), 'M'.code.toByte(), 'L'.code.toByte(), 'K'.code.toByte()))
+            }
+        } catch (_: Exception) {
+            false
+        }
     }
 
     /**

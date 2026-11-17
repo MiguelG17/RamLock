@@ -1,6 +1,7 @@
 package com.tuidev.ramlock
 
 import android.content.Context
+import android.os.ParcelFileDescriptor
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -122,5 +123,44 @@ class VaultRepositoryTest {
 
         // 4. We check that it is NO LONGER on the disk
         assertFalse("The physical file must have been deleted from the disk", diskFile.exists())
+    }
+
+    @Test
+    fun encryptAndSaveFileStream_andDecryptToFileStream_success() = runBlocking {
+        val fileName = "streaming_video.mp4"
+        val originalBytes = ByteArray(128 * 1024) { (it % 127).toByte() }
+        val password = "StreamPassword2026!"
+
+        val sourceFile = File(context.cacheDir, "source_temp.mp4")
+        sourceFile.writeBytes(originalBytes)
+        val sourcePfd = ParcelFileDescriptor.open(sourceFile, ParcelFileDescriptor.MODE_READ_ONLY)
+
+        // 1. Encrypt via Stream
+        val saveResult = repository.encryptAndSaveFileStream(
+            originalName = fileName,
+            sourcePfd = sourcePfd,
+            password = password,
+            fileSize = originalBytes.size.toLong()
+        )
+        sourcePfd.close()
+        sourceFile.delete()
+
+        assertTrue(saveResult.isSuccess)
+        val metadata = saveResult.getOrThrow()
+        assertTrue(storage.isStreamEncrypted(metadata.encryptedFileName))
+
+        // 2. Decrypt via Stream to Destination PFD
+        val destFile = File(context.cacheDir, "dest_temp.mp4")
+        val destPfd = ParcelFileDescriptor.open(
+            destFile,
+            ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_WRITE_ONLY or ParcelFileDescriptor.MODE_TRUNCATE
+        )
+
+        val decResult = repository.decryptToFileStream(metadata, password, destPfd)
+        destPfd.close()
+
+        assertTrue(decResult.isSuccess)
+        assertArrayEquals(originalBytes, destFile.readBytes())
+        destFile.delete()
     }
 }
