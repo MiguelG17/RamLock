@@ -1,6 +1,7 @@
 package com.tuidev.ramlock.ui
 
 import com.tuidev.ramlock.data.FileMetadata
+import java.io.File
 
 data class VaultUiState(
     val isUnlocked: Boolean = false,
@@ -32,10 +33,10 @@ data class OperationProgress(
 }
 
 /**
- * Holds the decrypted bytes and the file type so the viewer knows how to render them.
+ * Holds the reference to the decrypted temp file and the file type so the viewer knows how to render them.
  */
 data class OpenedFile(
     val name: String,
     val category: FileCategory,
-    val bytes: ByteArray
+    val file: File
 )

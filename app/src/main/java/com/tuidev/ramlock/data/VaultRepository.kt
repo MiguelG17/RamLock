@@ -171,14 +171,51 @@ class VaultRepository(
     }
 
     /**
+     * Decrypts an encrypted vault file into a target File via streaming.
+     */
+    suspend fun decryptToTempFile(
+        metadata: FileMetadata,
+        password: String,
+        targetFile: File,
+        onProgress: ((bytesProcessed: Long, totalBytes: Long) -> Unit)? = null
+    ): Result<File> = withContext(Dispatchers.IO) {
+        try {
+            val targetPfd = ParcelFileDescriptor.open(
+                targetFile,
+                ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_WRITE_ONLY or ParcelFileDescriptor.MODE_TRUNCATE
+            )
+
+            val result = targetPfd.use { outPfd ->
+                decryptToFileStream(metadata, password, outPfd, onProgress)
+            }
+
+            if (result.isSuccess) {
+                Result.success(targetFile)
+            } else {
+                targetFile.delete()
+                Result.failure(result.exceptionOrNull() ?: IllegalArgumentException("Decryption failed"))
+            }
+        } catch (e: Exception) {
+            targetFile.delete()
+            Result.failure(e)
+        }
+    }
+
+    /**
      * Read bytes from private disk and decrypt them using Rust with the given password.
-     * Handles both modern RMLK streaming files and legacy block-encrypted files.
+     * Note: For files larger than 20 MB, decryptToTempFile or decryptToFileStream MUST be used
+     * to avoid OutOfMemoryError.
      */
     suspend fun decryptFile(
         metadata: FileMetadata,
         password: String
     ): Result<ByteArray> = withContext(Dispatchers.IO) {
         try {
+            if (metadata.fileSize > 20 * 1024 * 1024) {
+                return@withContext Result.failure(
+                    IllegalStateException("File size is too large (${metadata.fileSize / (1024 * 1024)} MB) to load into RAM. Use streaming decryption instead.")
+                )
+            }
             if (storage.isStreamEncrypted(metadata.encryptedFileName)) {
                 val encFile = storage.getEncryptedFile(metadata.encryptedFileName)
                 val tempDecFile = File.createTempFile("temp_dec_", ".bin", encFile.parentFile)

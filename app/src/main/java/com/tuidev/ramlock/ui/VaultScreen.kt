@@ -122,7 +122,7 @@ fun VaultScreen(
 
     // State for file extraction / export out of vault
     var fileToExtract by remember { mutableStateOf<FileMetadata?>(null) }
-    var extractBytesCache by remember { mutableStateOf<ByteArray?>(null) }
+    var extractPassword by remember { mutableStateOf<String?>(null) }
 
     // State for options/settings dialog
     var showOptionsDialog by remember { mutableStateOf(false) }
@@ -148,15 +148,13 @@ fun VaultScreen(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
         val destinationUri = result.data?.data
-        destinationUri?.let { uri ->
-            val targetFile = fileToExtract
-            val bytes = extractBytesCache
-            if (targetFile != null && bytes != null) {
-                viewModel.finalizeExtraction(context, uri, bytes, targetFile)
-            }
+        val targetFile = fileToExtract
+        val pwd = extractPassword
+        if (destinationUri != null && targetFile != null && pwd != null) {
+            viewModel.extractFileToUri(context, targetFile, pwd, destinationUri)
         }
         fileToExtract = null
-        extractBytesCache = null
+        extractPassword = null
     }
 
     fun launchExportIntent(metadata: FileMetadata) {
@@ -443,16 +441,13 @@ fun VaultScreen(
             ExtractPasswordDialog(
                 fileName = metadata.originalName,
                 onConfirm = { password ->
-                    viewModel.decryptForExtraction(
-                        metadata = metadata,
-                        password = password,
-                        onSuccess = { decryptedBytes ->
-                            extractBytesCache = decryptedBytes
-                            launchExportIntent(metadata)
-                        }
-                    )
+                    extractPassword = password
+                    launchExportIntent(metadata)
                 },
-                onDismiss = { fileToExtract = null }
+                onDismiss = {
+                    fileToExtract = null
+                    extractPassword = null
+                }
             )
         }
 
@@ -486,7 +481,7 @@ fun VaultScreen(
         uiState.fileToOpen?.let { file ->
             DecryptPasswordDialog(
                 fileName = file.originalName,
-                onConfirm = { password -> viewModel.openFile(file, password) },
+                onConfirm = { password -> viewModel.openFile(context, file, password) },
                 onDismiss = { viewModel.dismissOpenDialog() }
             )
         }
@@ -1216,10 +1211,8 @@ fun FileViewerDialog(
             ) {
                 when (openedFile.category) {
                     FileCategory.IMAGE -> {
-                        val bitmap = remember(openedFile.bytes) {
-                            android.graphics.BitmapFactory.decodeByteArray(
-                                openedFile.bytes, 0, openedFile.bytes.size
-                            )
+                        val bitmap = remember(openedFile.file) {
+                            android.graphics.BitmapFactory.decodeFile(openedFile.file.absolutePath)
                         }
                         if (bitmap != null) {
                             Image(
@@ -1236,8 +1229,20 @@ fun FileViewerDialog(
                     }
 
                     FileCategory.TEXT -> {
-                        val text = remember(openedFile.bytes) {
-                            openedFile.bytes.toString(Charsets.UTF_8)
+                        val text = remember(openedFile.file) {
+                            try {
+                                if (openedFile.file.length() > 2 * 1024 * 1024) {
+                                    openedFile.file.inputStream().use { stream ->
+                                        val buffer = ByteArray(2 * 1024 * 1024)
+                                        val read = stream.read(buffer)
+                                        String(buffer, 0, read, Charsets.UTF_8) + "\n\n[... Truncated for preview ...]"
+                                    }
+                                } else {
+                                    openedFile.file.readText(Charsets.UTF_8)
+                                }
+                            } catch (e: Exception) {
+                                "Error reading text file: ${e.message}"
+                            }
                         }
                         Text(
                             text = text,
@@ -1279,13 +1284,10 @@ fun FileViewerDialog(
 
 private fun openWithSystemApp(context: android.content.Context, openedFile: OpenedFile) {
     try {
-        val cacheFile = java.io.File(context.cacheDir, openedFile.name)
-        cacheFile.writeBytes(openedFile.bytes)
-
         val uri = androidx.core.content.FileProvider.getUriForFile(
             context,
             "${context.packageName}.fileprovider",
-            cacheFile
+            openedFile.file
         )
 
         val intent = Intent(Intent.ACTION_VIEW).apply {
