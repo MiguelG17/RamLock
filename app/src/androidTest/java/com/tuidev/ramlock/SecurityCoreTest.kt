@@ -57,4 +57,54 @@ class SecurityCoreTest {
 
         assertArrayEquals(originalBytes, decryptedBytes)
     }
+
+    @Test
+    fun encryptAndDecryptStream_roundtripWithFileDescriptors() {
+        val context = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
+        val inputFile = java.io.File(context.cacheDir, "test_plain.txt")
+        val encryptedFile = java.io.File(context.cacheDir, "test_cipher.enc")
+        val decryptedFile = java.io.File(context.cacheDir, "test_recovered.txt")
+
+        try {
+            val originalText = "Streaming encryption with File Descriptors on Android! ".repeat(500)
+            val originalBytes = originalText.toByteArray(Charsets.UTF_8)
+            inputFile.writeBytes(originalBytes)
+
+            val password = "StreamMasterPassword2026!"
+
+            // 1. Encrypt Stream
+            val inPfd = android.os.ParcelFileDescriptor.open(inputFile, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
+            val outPfd = android.os.ParcelFileDescriptor.open(
+                encryptedFile,
+                android.os.ParcelFileDescriptor.MODE_CREATE or android.os.ParcelFileDescriptor.MODE_WRITE_ONLY or android.os.ParcelFileDescriptor.MODE_TRUNCATE
+            )
+
+            val encSuccess = inPfd.use { inStream ->
+                outPfd.use { outStream ->
+                    SecurityCore.encryptStream(password, inStream.fd, outStream.fd)
+                }
+            }
+            assertTrue(encSuccess)
+            assertTrue(encryptedFile.exists() && encryptedFile.length() > 28)
+
+            // 2. Decrypt Stream
+            val encInPfd = android.os.ParcelFileDescriptor.open(encryptedFile, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
+            val decOutPfd = android.os.ParcelFileDescriptor.open(
+                decryptedFile,
+                android.os.ParcelFileDescriptor.MODE_CREATE or android.os.ParcelFileDescriptor.MODE_WRITE_ONLY or android.os.ParcelFileDescriptor.MODE_TRUNCATE
+            )
+
+            val decSuccess = encInPfd.use { inStream ->
+                decOutPfd.use { outStream ->
+                    SecurityCore.decryptStream(password, inStream.fd, outStream.fd)
+                }
+            }
+            assertTrue(decSuccess)
+            assertArrayEquals(originalBytes, decryptedFile.readBytes())
+        } finally {
+            inputFile.delete()
+            encryptedFile.delete()
+            decryptedFile.delete()
+        }
+    }
 }

@@ -17,4 +17,8 @@ object SecurityCore {
     // Returns null if the password is incorrect or data is corrupted
     external fun decryptData(password: String, data: ByteArray): ByteArray?
     external fun encryptData(password: String, data: ByteArray): ByteArray?
+
+    // Streaming encryption and decryption with File Descriptors (0-heap allocation)
+    external fun encryptStream(password: String, inFd: Int, outFd: Int): Boolean
+    external fun decryptStream(password: String, inFd: Int, outFd: Int): Boolean
 }
